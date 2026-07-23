@@ -34,11 +34,14 @@ describe('web-conclude-policy', () => {
     expect(shouldConcludeWithWebSearch(prompt)).toBe(true);
   });
 
-  it('treats explicit business contact lookup as freshness-sensitive', () => {
+  it('treats mutable business details as freshness-sensitive without requiring "current"', () => {
     const prompt = 'find the phone number online for Pizzabakeren Hommersåk';
     expect(isFreshLocalBusinessContactRequest(prompt)).toBe(true);
     expect(shouldConcludeWithWebSearch(prompt)).toBe(true);
-    expect(isFreshLocalBusinessContactRequest('what was the phone number to pb hommersåk?')).toBe(false);
+    expect(isFreshLocalBusinessContactRequest('what was the phone number to pb hommersåk?')).toBe(true);
+    expect(needsLiveExternalEvidence('what are their opening hours?')).toBe(true);
+    expect(needsLiveExternalEvidence('show me the current restaurant menu')).toBe(true);
+    expect(needsLiveExternalEvidence('what is the snow park schedule?')).toBe(true);
     expect(isFreshLocalBusinessContactRequest('Build a clean phone-friendly shopping app.')).toBe(false);
     expect(isFreshLocalBusinessContactRequest('I am a photographer and need a website.')).toBe(false);
   });

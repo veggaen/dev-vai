@@ -41,6 +41,8 @@ interface TranscribeBody {
   quality?: 'fast' | 'balanced' | 'best';
   model?: string;
   preferOllama?: boolean;
+  /** User's custom terms — decode-time biasing for prompt-capable engines (cloud/Ollama). */
+  vocabulary?: string[];
 }
 
 interface PolishBody {
@@ -235,7 +237,7 @@ export function registerSttRoutes(
   warmBuiltinWhisper();
 
   app.post<{ Body: TranscribeBody }>('/api/stt/transcribe', async (request, reply) => {
-    const { data, mimeType, language, model, preferOllama } = request.body ?? {};
+    const { data, mimeType, language, model, preferOllama, vocabulary } = request.body ?? {};
     if (!data || !mimeType) {
       return reply.status(400).send({ error: 'Missing audio data or mimeType' });
     }
@@ -272,7 +274,10 @@ export function registerSttRoutes(
       }
 
       const text = repairKnownAsrArtifacts(
-        await transcribeAudio(audio, mimeType, language, choice, key, controller.signal),
+        await transcribeAudio(
+          audio, mimeType, language, choice, key, controller.signal,
+          sanitizeVocabulary(vocabulary),
+        ),
       );
       return reply.send({ text, engine: choice.engine, source: choice.source });
     } catch (err) {

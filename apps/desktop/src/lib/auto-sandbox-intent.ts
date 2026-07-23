@@ -252,4 +252,18 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
         : 'Preparing a runnable preview from this request...',
     requestSystemPrompt: [
       'This user message is an execute-now build request, not a discussion request.',
-      'Treat this turn like a
+      'Treat this turn like a builder execution turn while keeping the normal chat UX.',
+      'Do not output research notes, grounding notes, citations, or architecture advice unless they are strictly required to unblock the build.',
+      sandboxIntent.explicitStarterRequest
+        ? 'Prefer the cleanest starter path, including sandbox template markers when that is the fastest honest way to launch the preview.'
+        : freshBuildOnAttachedProject
+          ? 'The user phrased this as a fresh build request. Do not mutate the currently attached app unless they explicitly ask to reuse it.'
+        : 'Answer briefly and then emit the files and sandbox action markers needed to create or update the runnable preview in this turn.',
+      'If you emit files for a new app, include a complete runnable file set with title="path/to/file" code blocks and include package.json.',
+      freshBuildOnAttachedProject
+        ? 'Prefer a fresh runnable app for this turn instead of iterating the attached preview.'
+        : 'If an active preview exists, continue that app unless the user explicitly asked for a fresh rebuild.',
+      'If you are truly blocked, ask one short blocking question instead of emitting speculative files.',
+    ].join(' '),
+  };
+}

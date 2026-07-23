@@ -2,7 +2,11 @@ import { useCallback, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShortcutsStore } from '../../../stores/shortcutsStore.js';
-import { formatCapturedShortcut } from '../../../lib/keyboard-shortcuts.js';
+import {
+  formatCapturedShortcut,
+  getDefaultShortcut,
+  GLOBAL_DICTATION_SHORTCUTS,
+} from '../../../lib/keyboard-shortcuts.js';
 import { SettingsCard, SettingsSection } from './SettingsShell.js';
 
 export function ShortcutCustomizer() {
@@ -28,12 +32,17 @@ export function ShortcutCustomizer() {
     }
     const captured = formatCapturedShortcut(e.nativeEvent);
     if (!captured) return;
+    if (id === 'globalDictation' && !(GLOBAL_DICTATION_SHORTCUTS as readonly string[]).includes(captured)) {
+      toast.error(`Use one of: ${GLOBAL_DICTATION_SHORTCUTS.join(', ')}`);
+      return;
+    }
     setOverride(id as Parameters<typeof setOverride>[0], captured);
     setRecordingId(null);
     toast.success('Shortcut updated');
   }, [setOverride]);
 
   const categories = [
+    { key: 'voice', label: 'Voice' },
     { key: 'navigation', label: 'Navigation' },
     { key: 'workspace', label: 'Workspace' },
     { key: 'panels', label: 'Panels' },
@@ -72,12 +81,35 @@ export function ShortcutCustomizer() {
                 {items.map((item) => {
                   const isRecording = recordingId === item.id;
                   const isCustom = Boolean(overrides[item.id]);
+                  const isGlobalDictation = item.id === 'globalDictation';
                   return (
                     <li key={item.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-[color:var(--fg)]">{item.description}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
+                        {isGlobalDictation && (
+                          <select
+                            aria-label="Global dictation shortcut"
+                            value={item.keys}
+                            onChange={(event) => {
+                              const selected = event.target.value;
+                              if (selected === getDefaultShortcut('globalDictation').keys) {
+                                clearOverride('globalDictation');
+                              } else {
+                                setOverride('globalDictation', selected);
+                              }
+                              toast.success('Shortcut updated');
+                            }}
+                            className="min-w-[10rem] rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-3 py-1.5 font-mono text-[11px] text-[color:var(--fg)] focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-ring)]"
+                          >
+                            {GLOBAL_DICTATION_SHORTCUTS.map((shortcut) => (
+                              <option key={shortcut} value={shortcut}>{shortcut}</option>
+                            ))}
+                          </select>
+                        )}
+                        {!isGlobalDictation && (
+                          <>
                         <kbd
                           tabIndex={0}
                           onFocus={() => startRecording(item.id)}
@@ -97,6 +129,8 @@ export function ShortcutCustomizer() {
                         >
                           Record
                         </button>
+                          </>
+                        )}
                         {isCustom && (
                           <button
                             type="button"

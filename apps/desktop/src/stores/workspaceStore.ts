@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import type { IdeEvent } from '@vai/api-types/ide-ws';
+import type { IdeEvent } from '@vai/contracts/ide-ws';
 import { makeProposal, withStatus, type FileEditProposal } from '@vai/core/browser';
 import {
   applyApprovedProposals,
@@ -527,7 +527,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // Explicit file target (chat-driven edits) wins over the open tab; the tab
     // remains the default for the classic editor-panel flow.
     const tab = activeTabFrom(get());
-    let rel = relOverride ?? tab?.path ?? null;
+    const rel = relOverride ?? tab?.path ?? null;
     let original = relOverride ? null : tab?.original ?? null;
     if (!rel) return;
     if (original === null) {
@@ -757,12 +757,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!root) return;
     if (get().devServerStatus === 'starting' || get().devServerStatus === 'running') return;
 
-    let plan = null;
+    let plan: ReturnType<typeof detectDevServerPlan>;
     try {
       const pkg = await readWorkspaceFile(root, 'package.json');
       plan = detectDevServerPlan(pkg, lockfilePmHint(get().tree));
     } catch {
-      plan = null;
+      return;
     }
     if (!plan) return; // Nothing runnable — stay quiet, the terminal is still there.
 
@@ -873,4 +873,97 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().appendTerminalLine('✗ Dev server started but preview URL not detected yet — try Refresh or check terminal output.');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      set({ devServerStatus: 'failed', devServerErr
+      set({ devServerStatus: 'failed', devServerError: msg });
+      get().appendTerminalLine(`✗ Dev server failed: ${msg}`);
+    }
+  },
+
+  stopDevServer: async () => {
+    try {
+      await stopDevServerProcess();
+    } catch { /* non-fatal */ }
+    set({
+      devServerStatus: 'idle',
+      devServerUrl: null,
+      devServerPort: null,
+      devServerLogPath: null,
+    });
+  },
+
+  refreshDevProbe: async () => {
+    const { devServerLogPath, devServerLabel } = get();
+    const root = get().localRoot;
+    if (!root) return;
+    if (get().devServerStatus === 'idle') {
+      await get().autoLaunchDevServer();
+      return;
+    }
+    const ports = excludeVaiPorts([3000, 5173, 5174, 8080]);
+    if (devServerLogPath) {
+      try {
+        const log = await tailDevLog(devServerLogPath);
+        for (const p of excludeVaiPorts(parsePortsFromLog(log))) {
+          if (!ports.includes(p)) ports.unshift(p);
+        }
+      } catch { /* ignore */ }
+    }
+    const live = await probeFirstLivePort(ports, probeLocalPort);
+    if (live) {
+      set({
+        devServerStatus: 'running',
+        devServerPort: live,
+        devServerUrl: `http://127.0.0.1:${live}`,
+        devServerError: null,
+      });
+      toast.success(`${devServerLabel ?? 'Dev server'} — preview connected`);
+    }
+  },
+
+  handleIdeEvent: (event) => {
+    switch (event.type) {
+      case 'ide.proposal.created':
+        if (event.proposals.length > 0) {
+          const proposals = mergeUniqueProposals(get().proposals, event.proposals);
+          saveCurrentProposals(get(), proposals);
+          set({
+            proposals,
+            showDiffPanel: true,
+          });
+        }
+        break;
+      case 'ide.proposal.updated':
+        {
+          const proposals = get().proposals.map((p) =>
+            (p.id === event.id ? withStatus(p, event.status) : p));
+          saveCurrentProposals(get(), proposals);
+          set({ proposals });
+        }
+        break;
+      case 'ide.turn.quiescent':
+        set({ busy: false, councilBusy: false, terminalBusy: false });
+        break;
+      default:
+        break;
+    }
+  },
+}));
+
+// Dev-only handle for visual gates (same pattern as window.__vai_cursor) —
+// lets Playwright drive store states (e.g. the run-permission card) in a
+// plain browser where Tauri disk access is unavailable.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__vai_workspace = useWorkspaceStore;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    const state = useWorkspaceStore.getState();
+    const scope = currentProposalScope(state);
+    if (!scope || event.key !== proposalStorageKey(scope)) return;
+    const proposals = loadStoredProposals(scope);
+    useWorkspaceStore.setState((state) => ({
+      proposals,
+      showDiffPanel: state.showDiffPanel || proposals.length > 0,
+    }));
+  });
+}

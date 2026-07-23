@@ -61,7 +61,16 @@ import {
 } from '../lib/project-artifact.js';
 import { toast } from 'sonner';
 import { useWorkspaceStore } from '../stores/workspaceStore.js';
-import { existingPreviewRemainedHealthy } from '../lib/preview-verification.js';
+import {
+  PREVIEW_REFRESH_REQUEST_EVENT,
+  existingPreviewRemainedHealthy,
+  type PreviewRefreshRequest,
+} from '../lib/preview-verification.js';
+import {
+  blockingVisualLayoutEvidence,
+  isVisualLayoutCandidate,
+  requestVisualLayoutVerification,
+} from '../lib/visual-layout-verification.js';
 
 /** Max number of automatic repair attempts before giving up */
 const MAX_REPAIR_ATTEMPTS = 2;
@@ -465,12 +474,16 @@ export function useAutoSandbox() {
     const browserDetail = browserRuntimeErrors && browserRuntimeErrors.length > 0
       ? `\n\nBrowser runtime errors detected in the preview:\n\`\`\`\n${browserRuntimeErrors.join('\n').slice(0, 1200)}\n\`\`\``
       : '';
-    const repairPrompt = `The dev server on port ${port} did not respond after applying your last changes (repair attempt ${attempt}/${MAX_REPAIR_ATTEMPTS}).${reasonLine}
+    const visualFailure = reason?.startsWith('visual layout audit failed') ?? false;
+    const failureLead = visualFailure
+      ? `The rendered App on port ${port} failed deterministic multi-viewport layout verification after applying your last changes (repair attempt ${attempt}/${MAX_REPAIR_ATTEMPTS}).`
+      : `The dev server on port ${port} did not respond after applying your last changes (repair attempt ${attempt}/${MAX_REPAIR_ATTEMPTS}).`;
+    const repairPrompt = `${failureLead}${reasonLine}
 
 Files that were applied:
 ${fileList}${errorDetail}${stderrDetail}${browserDetail}
 
-Please diagnose the issue and provide corrected file(s). Output only the files that need to change, using title="path/to/file" on each code block.`;
+Please diagnose the issue and provide corrected file(s). Preserve working behavior and fix the measured evidence rather than hiding or disabling the visual check. Output only the files that need to change, using title="path/to/file" on each code block.`;
 
     const systemContext = `SYSTEM: This is an automatic repair request triggered by the build verification system. The previous response caused a sandbox failure. Respond with corrected files only — no preamble, no explanation beyond a one-line root cause. Use title="path" attributes on all file blocks.`;
 
@@ -621,6 +634,53 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
         });
         setBuildStatus({ step: 'fixing', message: 'Preview stayed blank in the app shell — initiating repair...' });
         return triggerRepair(port, filesApplied, buildError, 'preview never loaded in the app shell', capturedStderr);
+      }
+
+      if (projectId && isVisualLayoutCandidate(filePaths)) {
+        setBuildStatus({ step: 'building', message: 'Auditing rendered spacing at desktop, tablet, and mobile...' });
+        const visualVerification = await requestVisualLayoutVerification(projectId, API_BASE);
+        if (visualVerification.available && visualVerification.report) {
+          const visualReport = visualVerification.report;
+          const blockingEvidence = blockingVisualLayoutEvidence(visualReport);
+          withCapture((capture) => {
+            capture.verification(
+              blockingEvidence.length > 0
+                ? 'Rendered layout failed relational geometry checks'
+                : `Rendered layout ${visualReport.verdict === 'warn' ? 'passed with non-blocking warnings' : 'passed'} at three viewport widths`,
+              {
+                target: 'preview-runtime',
+                status: blockingEvidence.length > 0 ? 'failed' : 'passed',
+                port,
+                evidence: blockingEvidence.slice(0, 6),
+              },
+            );
+            capture.artifact('Captured deterministic multi-viewport layout report', {
+              artifactType: 'visual-layout-report',
+              label: `Visual layout: ${visualReport.verdict}`,
+              value: JSON.stringify(visualReport).slice(0, 8_000),
+              itemCount: visualReport.runs.reduce((count, run) => count + run.issues.length, 0),
+            });
+          });
+          if (blockingEvidence.length > 0) {
+            setBuildStatus({ step: 'fixing', message: 'Rendered spacing failed â€” initiating measured repair...' });
+            return triggerRepair(
+              port,
+              filesApplied,
+              buildError,
+              `visual layout audit failed: ${blockingEvidence.slice(0, 4).join(' | ')}`,
+              capturedStderr,
+            );
+          }
+        } else {
+          withCapture((capture) => {
+            capture.checkpoint('Rendered layout audit was unavailable; runtime proof remains honest', {
+              checkpoint: 'preview-layout-unavailable',
+              status: 'completed',
+              detail: visualVerification.error,
+              port,
+            });
+          });
+        }
       }
 
       withCapture((capture) => {
@@ -1111,31 +1171,68 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
               await triggerRepair(activePort, files, undefined, 'preview runtime error after hot reload', undefined, browserRuntimeErrors);
               return;
             }
-            const previewReloaded = await waitForPreviewIframeLoad(activePort, initialPreviewLoadCount, 3500);
+            let previewReloaded = await waitForPreviewIframeLoad(activePort, initialPreviewLoadCount, 3500);
+            let usedControlledRefresh = false;
+            if (!previewReloaded) {
+              // Vite normally patches the mounted React tree without an iframe
+              // `load` event. Ask the visible App surface for one controlled,
+              // cache-busted document refresh so the receipt can be backed by a
+              // browser load instead of guessing from server reachability.
+              const refreshBaseline = useSandboxStore.getState().previewLoadCount;
+              const refreshRequest: PreviewRefreshRequest = {
+                port: activePort,
+                requestId: `verify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              };
+              window.dispatchEvent(new CustomEvent(PREVIEW_REFRESH_REQUEST_EVENT, { detail: refreshRequest }));
+              previewReloaded = await waitForPreviewIframeLoad(activePort, refreshBaseline, 6000);
+              usedControlledRefresh = previewReloaded;
+
+              if (previewReloaded) {
+                const refreshRuntimeErrors = await waitForBrowserRuntimeErrors(logStartIndex, 1200);
+                if (refreshRuntimeErrors.length > 0) {
+                  withCapture((capture) => {
+                    capture.verification('Controlled browser refresh exposed runtime errors', {
+                      target: 'preview-runtime',
+                      status: 'failed',
+                      port: activePort,
+                      evidence: refreshRuntimeErrors.slice(0, 5),
+                    });
+                  });
+                  await triggerRepair(activePort, files, undefined, 'preview runtime error after controlled refresh', undefined, refreshRuntimeErrors);
+                  return;
+                }
+              }
+            }
             withCapture((capture) => {
               capture.verification(
                 previewReloaded
-                  ? `Hot reload refreshed the preview on port ${activePort}`
-                  : `Hot reload remained reachable on port ${activePort}, but no fresh preview load was observed`,
+                  ? usedControlledRefresh
+                    ? `Loaded the updated app in a controlled browser refresh on port ${activePort}`
+                    : `Hot reload refreshed the app on port ${activePort}`
+                  : `The app remained reachable on port ${activePort}, but neither HMR nor a controlled refresh produced browser-load proof`,
                 {
                   target: 'preview-runtime',
-                  status: 'passed',
+                  status: previewReloaded ? 'passed' : 'failed',
                   port: activePort,
                 },
               );
-              capture.checkpoint('Hot reload completed successfully', {
-                checkpoint: 'preview-hot-reload',
-                status: 'completed',
-                sandboxProjectId: currentState.projectId ?? undefined,
-                files: filePaths,
-                port: activePort,
-              });
+              if (previewReloaded) {
+                capture.checkpoint(usedControlledRefresh ? 'Controlled app refresh completed successfully' : 'Hot reload completed successfully', {
+                  checkpoint: usedControlledRefresh ? 'preview-controlled-refresh' : 'preview-hot-reload',
+                  status: 'completed',
+                  sandboxProjectId: currentState.projectId ?? undefined,
+                  files: filePaths,
+                  port: activePort,
+                });
+              }
             });
             if (previewReloaded) {
               previewVerified = true;
-              previewSummary = `Hot-reloaded the running preview and observed it refresh on port ${activePort}.`;
+              previewSummary = usedControlledRefresh
+                ? `Loaded the updated app in the browser and observed the fresh document on port ${activePort}.`
+                : `Hot-reloaded the running app and observed it refresh on port ${activePort}.`;
             } else {
-              previewSummary = `Applied the update while the preview stayed reachable on port ${activePort}, but a fresh preview load was not observed yet.`;
+              previewSummary = `Applied the update while the app stayed reachable on port ${activePort}, but fresh browser proof was not captured.`;
             }
           }
         }
@@ -1631,4 +1728,30 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
         hasActiveProject,
       });
       triggerMissingActionRepair({
-        grounde
+        groundedBrief: lastMsg.groundedBuildBrief,
+        sandboxIntent,
+        hasActiveProject,
+        userPrompt,
+      });
+      return;
+    }
+
+    const groundedBriefMessage = lastMsg.groundedBuildBrief
+      ? `${lastMsg.groundedBuildBrief.nextStep} No runnable preview was emitted yet.`
+      : null;
+    const noFileMessage = looksIncomplete
+      ? 'Reply ended early. Preview is unchanged until files land.'
+      : groundedBriefMessage
+        ? `Grounded direction ready. ${groundedBriefMessage}`
+      : hasActiveProject
+        ? 'Preview unchanged. The last Builder reply did not apply code changes yet.'
+        : 'Vai answered in chat, but no files were generated for preview yet.';
+    setBuildStatus({
+      step: hasActiveProject ? 'ready' : 'failed',
+      message: noFileMessage,
+    });
+    if (!hasActiveProject) {
+      toast.info('No runnable update was generated from the last Builder reply');
+    }
+  }, [effectiveMode, enqueue, isStreaming, messages, processDeploy, processFiles, processReplace, processTemplate, setBuildStatus, triggerMissingActionRepair, clearBuildActivity]);
+}

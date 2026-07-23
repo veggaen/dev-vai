@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildEvidenceContextSystemHint,
+  buildVenuePracticalEvidenceLimitation,
   expandQueryWithHistory,
   fetchTurnWebEvidence,
   shouldAttemptWebConclusion,
+  shouldShipGroundedSearchConclusion,
   tryWebConcludeTurn,
   wantsExplicitSourceReferences,
 } from './web-conclude-turn.js';
@@ -79,6 +81,18 @@ describe('web-conclude-turn', () => {
     ]);
     expect(q.toLowerCase()).toContain('electric');
     expect(q.toLowerCase()).not.toContain('only the name');
+  });
+
+  it('carries only the venue identity from a price turn into an hours follow-up', () => {
+    const q = expandQueryWithHistory('what are their opening hours?', [
+      { role: 'user', content: 'hello, what is the price of visiting the snow park in oslo the snø and what are their prices?' },
+      { role: 'assistant', content: '- 2 hours weekday: from 395 kr.' },
+      { role: 'user', content: 'what are their opening hours?' },
+    ]);
+
+    expect(q.toLowerCase()).toContain('snow park in oslo the snø');
+    expect(q.toLowerCase()).toContain('opening hours');
+    expect(q.toLowerCase()).not.toMatch(/price|395|admission|ticket/);
   });
 
   it('returns synthesized text when search returns sources', async () => {
@@ -173,6 +187,69 @@ describe('web-conclude-turn', () => {
     expect(prompt).toContain('[1] Example 1');
     expect(prompt).toContain('[2] Example 2');
     expect(prompt).not.toContain('[3] Example');
+  });
+
+  it('passes the deterministic grounded conclusion to the answering model', () => {
+    const base = testSearchResponse(['SNØ lists a weekday ticket from 395 kr.']);
+    const prompt = buildEvidenceContextSystemHint('What are the admission prices for SNØ?', {
+      ...base,
+      answer: 'Weekday admission starts at 395 kr. [1]',
+    });
+
+    expect(prompt).toContain('Search pipeline grounded conclusion:');
+    expect(prompt).toContain('Weekday admission starts at 395 kr. [1]');
+  });
+
+  it('ships a complete cited admission-price conclusion without letting a model replace it', () => {
+    const base = testSearchResponse(['2 hours weekday from 395 kr.']);
+    expect(shouldShipGroundedSearchConclusion({
+      ...base,
+      answer: '- 2 hours weekday: from 395 kr. [1]',
+      plan: { ...base.plan, intent: 'admission-price' },
+    })).toBe(true);
+    expect(shouldShipGroundedSearchConclusion({
+      ...base,
+      answer: 'I searched for tickets but found nothing.',
+      plan: { ...base.plan, intent: 'admission-price' },
+    })).toBe(false);
+  });
+
+  it('ships cited opening hours but rejects a price table mislabeled as hours', () => {
+    const base = testSearchResponse(['Official opening hours.']);
+    expect(shouldShipGroundedSearchConclusion({
+      ...base,
+      answer: '**Opening hours:** [1]\nMonday–Friday: 10:00–17:00; Saturday–Sunday: closed.',
+      plan: { ...base.plan, intent: 'venue-hours' },
+    })).toBe(true);
+    expect(shouldShipGroundedSearchConclusion({
+      ...base,
+      answer: '- 2 hours weekday: from 395 kr. [1]',
+      plan: { ...base.plan, intent: 'venue-hours' },
+    })).toBe(false);
+    expect(shouldShipGroundedSearchConclusion({
+      ...base,
+      answer: '**Opening hours:** [1]\nMonday–Friday: 10:00–17:00.',
+      plan: { ...base.plan, intent: 'venue-hours' },
+      sources: base.sources.map((source) => ({
+        ...source,
+        trust: { tier: 'low', score: 0.35, reason: 'Unverified directory' },
+      })),
+    })).toBe(false);
+  });
+
+  it('turns low-trust venue details into an explicit limitation instead of model input', () => {
+    const base = testSearchResponse(['A directory claims Monday 09:30–20:00.']);
+    const result: SearchResponse = {
+      ...base,
+      answer: '**Opening hours:** [1]\nMonday 09:30–20:00.',
+      plan: { ...base.plan, intent: 'venue-hours' },
+      sources: base.sources.map((source) => ({
+        ...source,
+        trust: { tier: 'low', score: 0.35, reason: 'Unverified directory' },
+      })),
+    };
+    expect(buildVenuePracticalEvidenceLimitation(result)).toMatch(/couldn't verify.*reliable source/i);
+    expect(buildVenuePracticalEvidenceLimitation(result)).toMatch(/won't turn an unverified directory/i);
   });
 
   it('keeps source-backed casual answers from turning into research reports', () => {

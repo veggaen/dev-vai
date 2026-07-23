@@ -98,4 +98,75 @@ describe('pickEditFilePaths', () => {
   });
 
   it('keeps read-only context but drops generic entry points when one editable file is declared', () => {
-    
+    const files = ['MMM_Unified.sol', 'DEPLOYMENT_PARAMS.md', 'package.json', 'app/layout.tsx', 'app/globals.css'];
+    const prompt = 'Use MMM_Unified.sol and DEPLOYMENT_PARAMS.md as read-only references. The only existing editable file is package.json.';
+    expect(pickEditFilePaths(files, prompt, 10)).toEqual([
+      'DEPLOYMENT_PARAMS.md',
+      'MMM_Unified.sol',
+      'package.json',
+    ]);
+  });
+});
+
+describe('buildWorkspaceEditContext', () => {
+  const port = (overrides: Partial<WorkspaceFilePort> = {}): WorkspaceFilePort => ({
+    describe: () => ({ name: 'mpm-frontend', external: true, framework: 'nextjs', devPort: 4100 }),
+    listFiles: async () => PROJECT_FILES,
+    readFile: async (_id, path) => `// content of ${path}\nexport default {};\n`,
+    ...overrides,
+  });
+
+  it('resolves the real project name, external flag, and named file content', async () => {
+    const ctx = await buildWorkspaceEditContext({
+      workspace: port(),
+      projectId: 'p1',
+      userPrompt: 'In components/Navbar.tsx, change the brand text.',
+    });
+    expect(ctx).not.toBeNull();
+    expect(ctx!.projectName).toBe('mpm-frontend');
+    expect(ctx!.external).toBe(true);
+    expect(ctx!.files[0].path).toBe('components/Navbar.tsx');
+    expect(ctx!.files[0].content).toContain('content of components/Navbar.tsx');
+  });
+
+  it('returns null for unknown projects', async () => {
+    const ctx = await buildWorkspaceEditContext({
+      workspace: port({ describe: () => null }),
+      projectId: 'missing',
+      userPrompt: 'change Navbar.tsx',
+    });
+    expect(ctx).toBeNull();
+  });
+
+  it('skips files too large for a small coder to faithfully re-emit', async () => {
+    const ctx = await buildWorkspaceEditContext({
+      workspace: port({ readFile: async (_id, path) => (path === 'components/Navbar.tsx' ? 'x'.repeat(50_000) : `// ${path}`) }),
+      projectId: 'p1',
+      userPrompt: 'In components/Navbar.tsx, change the brand text.',
+    });
+    expect(ctx).not.toBeNull();
+    expect(ctx!.files.map((f) => f.path)).not.toContain('components/Navbar.tsx');
+  });
+
+  it('includes a larger named read-only reference but keeps it context-only', async () => {
+    const ctx = await buildWorkspaceEditContext({
+      workspace: port({
+        listFiles: async () => ['MMM_Unified.sol', 'package.json'],
+        readFile: async (_id, path) => path === 'MMM_Unified.sol' ? 'x'.repeat(40_000) : '{}',
+      }),
+      projectId: 'p1',
+      userPrompt: 'Use MMM_Unified.sol as a read-only reference and update package.json.',
+    });
+    expect(ctx?.files.find((file) => file.path === 'MMM_Unified.sol')).toMatchObject({ readonly: true });
+    expect(ctx?.files.find((file) => file.path === 'package.json')?.readonly).toBeUndefined();
+  });
+
+  it('returns null when nothing readable remains', async () => {
+    const ctx = await buildWorkspaceEditContext({
+      workspace: port({ readFile: async () => null }),
+      projectId: 'p1',
+      userPrompt: 'change Navbar.tsx',
+    });
+    expect(ctx).toBeNull();
+  });
+});

@@ -36,7 +36,7 @@ import type {
   SummaryMeta,
   NoteMeta,
   EventMeta,
-} from '@vai/core/browser';
+} from '@vai/contracts/session-models';
 
 /* ── Types ─────────────────────────────────────────────────────── */
 

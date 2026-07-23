@@ -302,6 +302,30 @@ export const conversations = sqliteTable('conversations', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+/**
+ * A durable task artifact for Council edits that were useful but not safe to
+ * apply yet. This is the shared handoff between models and later chat turns:
+ * exact proposed files plus validation/review evidence, not hidden reasoning.
+ */
+export const councilWorkArtifacts = sqliteTable('council_work_artifacts', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull().references(() => conversations.id),
+  sandboxProjectId: text('sandbox_project_id'),
+  projectName: text('project_name').notNull(),
+  brief: text('brief').notNull(),
+  files: text('files').notNull(),
+  validation: text('validation').notNull(),
+  reviews: text('reviews').notNull(),
+  repairsUsed: integer('repairs_used').notNull().default(0),
+  memberIds: text('member_ids').notNull(),
+  status: text('status', { enum: ['pending', 'applied', 'superseded'] }).notNull().default('pending'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (table) => ({
+  conversationStatusIdx: index('idx_council_work_artifacts_conversation_status').on(table.conversationId, table.status, table.updatedAt),
+  sandboxStatusIdx: index('idx_council_work_artifacts_sandbox_status').on(table.sandboxProjectId, table.status),
+}));
+
 // ---- Images / Training Data ----
 
 export const images = sqliteTable('images', {

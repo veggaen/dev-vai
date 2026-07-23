@@ -730,7 +730,7 @@ describe('SearchPipeline.search', () => {
     });
     const result = await pipeline.search('find the phone number online for Pizzabakeren Hommersåk');
 
-    expect(result.plan.intent).toBe('current');
+    expect(result.plan.intent).toBe('venue-contact');
     expect(result.sources).toHaveLength(1);
     expect(result.sources[0]?.url).toBe('https://www.openstreetmap.org/node/444491228');
     expect(result.answer).toContain('**Pizzabakeren Hommersåk**');

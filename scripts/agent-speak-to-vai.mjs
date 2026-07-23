@@ -40,6 +40,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const LOG_FILE = join(ROOT, '.vai-agent-dialogue.log');
 const CONV_ID_FILE = join(ROOT, '.vai-agent-conv-id');
+const SERVER_PID_FILE = join(ROOT, '.vai-server.pid');
 const WS_URL = 'ws://localhost:3006/api/chat';
 const REST_URL = 'http://localhost:3006';
 const HEALTH_URL = 'http://localhost:3006/health';
@@ -79,11 +80,46 @@ async function ensureServerHealthy(timeoutMs = 30000) {
   return { ok: false };
 }
 
+function managedServerPid() {
+  try {
+    if (!existsSync(SERVER_PID_FILE)) return null;
+    const pid = Number.parseInt(readFileSync(SERVER_PID_FILE, 'utf8').trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function startServerIfNeeded() {
   const health = await ensureServerHealthy(3000);
   if (health.ok) {
     console.log('[agent-channel] Server already healthy.');
     return health.data;
+  }
+
+  // A local-model or Council turn can temporarily make /health miss the short
+  // probe while the managed runtime is still alive. Starting the manager in
+  // that state would stop the busy server and launch an overlapping runtime.
+  // Wait for the existing process instead; if it stays unavailable, fail into
+  // the client's safe direct-engine fallback without mutating runtime state.
+  const existingPid = managedServerPid();
+  if (existingPid && isProcessAlive(existingPid)) {
+    console.log(`[agent-channel] Managed VAI server PID ${existingPid} is alive but busy; waiting without restarting it...`);
+    const recovered = await ensureServerHealthy(30000);
+    if (recovered.ok) {
+      console.log('[agent-channel] Existing server became healthy.');
+      return recovered.data;
+    }
+    throw new Error(`Managed VAI server PID ${existingPid} stayed alive but did not become healthy; refusing to replace a busy runtime.`);
   }
 
   console.log('[agent-channel] Starting VAI server (no shortcuts, full start)...');
@@ -128,7 +164,13 @@ async function createConversation(title = 'Grok Engineer Agent ↔ Vai') {
 
 async function sendMessageViaWS(conversationId, content) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(WS_URL, {
+      headers: {
+        // Match the REST conversation-creation path so local dev ownership is
+        // consistent across create + send.
+        'x-vai-dev-auth-bypass': '1',
+      },
+    });
     let fullText = '';
     const events = {
       thinking: null,
@@ -158,7 +200,17 @@ async function sendMessageViaWS(conversationId, content) {
       let msg;
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
-      if (msg.type === 'text_delta' && msg.textDelta) {
+      // Terminal type wins over optional metadata fields. A `done` frame also
+      // carries `thinking` and often `modelId`; checking those first caused the
+      // client to misclassify every successful terminal frame and wait 120s.
+      if (msg.type === 'done') {
+        if (msg.thinking) events.thinking = msg.thinking;
+        if (msg.modelId) events.model = msg.modelId;
+        gotDone = true;
+        finish();
+      } else if (msg.type === 'error') {
+        finish({ error: msg.error, errorCode: msg.code, terminal: true });
+      } else if (msg.type === 'text_delta' && msg.textDelta) {
         fullText += msg.textDelta;
         process.stdout.write(msg.textDelta);
       } else if (msg.type === 'thinking' || msg.thinking) {
@@ -170,11 +222,6 @@ async function sendMessageViaWS(conversationId, content) {
         events.turnKind = msg.turnKind;
       } else if (msg.modelId) {
         events.model = msg.modelId;
-      } else if (msg.type === 'done') {
-        gotDone = true;
-        finish();
-      } else if (msg.type === 'error') {
-        finish({ error: msg.error });
       }
     });
 
@@ -224,15 +271,14 @@ function handleFramedData(bufRef, chunk, onMsg) {
   }
 }
 
-async function speakViaDirectLocal(content, conversationId) {
+async function speakViaDirectLocal(content, conversationId, transport = 'pipe') {
   // Preferred efficient path (andrewrk-inspired): connect to named pipe (or TCP fallback) with explicit length-prefixed framing.
   // Lower overhead than WS to main server. Still full ChatService inside runtime (all intelligence).
   // Persistent convId supported. Fast local on Win (named pipe kernel direct).
-  console.log('[agent-channel] Using DIRECT LOCAL (pipe preferred, framed) for minimal overhead.');
-  const usePipe = true; // primary
+  console.log(`[agent-channel] Using DIRECT LOCAL (${transport}, framed) for minimal overhead.`);
 
   return new Promise((resolve, reject) => {
-    const target = usePipe
+    const target = transport === 'pipe'
       ? { path: PIPE_PATH }
       : { host: DIRECT_TCP_HOST, port: DIRECT_TCP_PORT };
 
@@ -255,7 +301,7 @@ async function speakViaDirectLocal(content, conversationId) {
       settled = true;
       if (timeout) clearTimeout(timeout);
       try { sock.end(); } catch {}
-      resolve({ text: fullText.trim(), ...events, ...extra, directLocal: true });
+      resolve({ text: fullText.trim(), ...events, ...extra, directLocal: true, transport });
     };
 
     sock.on('connect', () => {
@@ -268,17 +314,9 @@ async function speakViaDirectLocal(content, conversationId) {
 
     sock.on('data', (chunk) => {
       handleFramedData(bufRef, chunk, (msg) => {
-        if (msg.type === 'delta' && msg.textDelta) {
-          fullText += msg.textDelta;
-          process.stdout.write(msg.textDelta);
-        } else if (msg.type === 'thinking' || msg.thinking) {
-          events.thinking = msg.thinking || msg;
-        } else if (msg.type === 'sources') {
-          events.sources = msg.sources || [];
-          if (typeof msg.confidence === 'number') events.confidence = msg.confidence;
-        } else if (msg.type === 'turn_kind') {
-          events.turnKind = msg.turnKind;
-        } else if (msg.type === 'done') {
+        // As with WebSocket, terminal type wins over attached thinking data.
+        if (msg.type === 'done') {
+          if (msg.thinking) events.thinking = msg.thinking;
           sawTerminal = true;
           finish({ terminal: true });
         } else if (msg.type === 'error') {
@@ -289,6 +327,16 @@ async function speakViaDirectLocal(content, conversationId) {
             retryable: msg.retryable,
             terminal: true,
           });
+        } else if (msg.type === 'delta' && msg.textDelta) {
+          fullText += msg.textDelta;
+          process.stdout.write(msg.textDelta);
+        } else if (msg.type === 'thinking' || msg.thinking) {
+          events.thinking = msg.thinking || msg;
+        } else if (msg.type === 'sources') {
+          events.sources = msg.sources || [];
+          if (typeof msg.confidence === 'number') events.confidence = msg.confidence;
+        } else if (msg.type === 'turn_kind') {
+          events.turnKind = msg.turnKind;
         }
       });
     });
@@ -381,21 +429,31 @@ async function main() {
       // Try the upgraded direct local channel first (pipe + explicit framing) — more efficient, lower overhead than WS.
       // Falls back inside to TCP if pipe not listening, then to WS.
       try {
-        console.log('[agent-channel] Sending via direct local (pipe framed)...');
-        responseData = await speakViaDirectLocal(message, convId);
-        if (
-          responseData.connectFailed
-          || responseData.timedOut
-          || responseData.missingTerminal
-          || (responseData.error && !responseData.terminal)
-          || (
-            !responseData.text
-            && !responseData.thinking
-            && !(responseData.terminal && responseData.error)
-          )
-        ) {
-          throw new Error('direct local incomplete');
+        let directFailure = 'no local transport attempted';
+        for (const transport of ['pipe', 'tcp']) {
+          console.log(`[agent-channel] Sending via direct local (${transport}, framed)...`);
+          responseData = await speakViaDirectLocal(message, convId, transport);
+          const incomplete =
+            responseData.connectFailed
+            || responseData.timedOut
+            || responseData.missingTerminal
+            || (responseData.error && !responseData.terminal)
+            || (
+              !responseData.text
+              && !responseData.thinking
+              && !(responseData.terminal && responseData.error)
+            );
+          if (!incomplete) break;
+          directFailure = [
+            responseData.error,
+            responseData.connectFailed ? 'connect failed' : '',
+            responseData.timedOut ? 'timed out' : '',
+            responseData.missingTerminal ? 'missing terminal frame' : '',
+            !responseData.text ? 'empty text' : '',
+          ].filter(Boolean).join(', ') || 'incomplete response';
+          responseData = undefined;
         }
+        if (!responseData) throw new Error(directFailure);
       } catch (directErr) {
         console.log(`[agent-channel] Direct local unavailable/incomplete (${directErr.message}), falling back to WS...`);
         responseData = await sendMessageViaWS(convId, message);

@@ -19,6 +19,11 @@ import {
 import { isCapabilitiesFallbackResponse } from './capabilities-fallback.js';
 import { resolveContextualFollowUp } from './contextual-resolver.js';
 import { wantsExplicitSourceReferences } from './intent-lexicon.js';
+import {
+  answerMatchesVenuePracticalDetail,
+  venuePracticalKindFromIntent,
+} from '../venue-practical-detail.js';
+import { wrapUntrustedContent } from '../security/untrusted-content.js';
 
 export { wantsExplicitSourceReferences } from './intent-lexicon.js';
 
@@ -219,15 +224,53 @@ export function buildEvidenceContextSystemHint(query: string, result: SearchResp
     const excerpt = source.text.trim().slice(0, 320);
     return `[${index + 1}] ${source.title || source.domain} (${source.domain})\n${excerpt}\nURL: ${source.url}`;
   }).join('\n\n');
+  const groundedConclusion = result.answer.trim();
+  const hasUsefulConclusion = groundedConclusion.length > 0
+    && !/^I searched for\b/i.test(groundedConclusion);
 
   return [
     'Web sources were retrieved for this turn.',
     'Ground factual claims in these sources when they apply.',
     buildSourceReferenceContract(query, result),
     `User question: ${query.trim()}`,
+    ...(hasUsefulConclusion
+      ? ['Search pipeline grounded conclusion:', wrapUntrustedContent('web-content', groundedConclusion.slice(0, 2_000), { source: 'search synthesis' })]
+      : []),
     'Sources:',
-    snippets,
+    wrapUntrustedContent('web-content', snippets, { source: 'retrieved web sources' }),
   ].join('\n\n');
+}
+
+/** A complete cited practical-detail answer is already verified; do not let a model change its shape. */
+export function shouldShipGroundedSearchConclusion(result: SearchResponse): boolean {
+  const kind = venuePracticalKindFromIntent(result.plan.intent);
+  if (!kind || result.sources.length === 0) return false;
+  if (result.sources[0]?.trust.tier !== 'high' && result.sources[0]?.trust.tier !== 'medium') return false;
+  const answer = result.answer.trim();
+  if (!answer || /^I searched for\b/i.test(answer)) return false;
+  return /\[\d+\]/.test(answer) && answerMatchesVenuePracticalDetail(kind, answer);
+}
+
+/** Keep mutable venue facts out of the model when retrieval did not clear Vai's evidence bar. */
+export function buildVenuePracticalEvidenceLimitation(result: SearchResponse): string | null {
+  const kind = venuePracticalKindFromIntent(result.plan.intent);
+  if (!kind || shouldShipGroundedSearchConclusion(result)) return null;
+  const labels: Record<typeof kind, string> = {
+    hours: 'opening hours',
+    'admission-price': 'admission prices',
+    'menu-price': 'menu prices',
+    menu: 'menu',
+    schedule: 'schedule',
+    contact: 'contact details',
+    address: 'address',
+    website: 'official website',
+    parking: 'parking details',
+    accessibility: 'accessibility details',
+  };
+  const hasTrustedSource = result.sources.some((source) => source.trust.tier === 'high' || source.trust.tier === 'medium');
+  return hasTrustedSource
+    ? `I found reliable pages for the requested venue, but none exposed verifiable current ${labels[kind]} for that exact branch. I won't substitute general background or another branch's details.`
+    : `I found listings for the requested venue, but I couldn't verify its current ${labels[kind]} from a reliable source. I won't turn an unverified directory listing into an answer.`;
 }
 
 function buildResearchTraceFromSearch(result: SearchResponse, sourceCount: number): ResearchTrace {

@@ -17,7 +17,12 @@ export function hasProductEngineeringSignal(input: string): boolean {
   const text = input.trim();
   if (!text) return false;
   if (AUTOMOTIVE_OR_CONSUMER_BATTERY.test(text)) return false;
-  return HARDWARE_PRODUCT_SIGNAL.test(text) || (
+  const hasHardwareSignal = HARDWARE_PRODUCT_SIGNAL.test(text);
+  // Temperature/humidity alone are ambiguous: they commonly appear in
+  // weather and measurement questions. Require a physical-device/product
+  // co-signal before the full hardware-product memo may take the turn.
+  const hasUnambiguousHardwareSignal = /\b(?:hardware|sensors?|thermostat|mcu|esp32|arduino|stm32|pcb|pcba|bom|bill of materials|enclosure|casing|wall[-\s]?mount|touchscreen|firmware|i2c|spi|sht(?:3x|4x|40|45)?|dht22|aht20|mqtt|lora|batteries|wiring|solder|buck converter|calibration|ce marking|fcc|injection mold|3d[-\s]?print|jlcpcb|lcsc|aliexpress|mouser|digikey|digi-key)\b/i.test(text);
+  return (hasHardwareSignal && hasUnambiguousHardwareSignal) || (
     PRODUCT_RESEARCH_SIGNAL.test(text)
     && /\b(?:hardware|device|sensor|physical|wall|enclosure|firmware|pcb|manufacturing|sourcing|product)\b/i.test(text)
   );
@@ -35,6 +40,15 @@ export function hasExplicitSoftwareBuildRequest(input: string): boolean {
   return SOFTWARE_EXECUTION_ANCHOR.test(text);
 }
 
+/**
+ * Formal-logic / rule-inference prompts mention devices ("the sensor trips",
+ * "the alarm rings") as abstract propositions, not as products to build.
+ * A stated rule plus an inference question must never route to the memo.
+ */
+const RULE_INFERENCE_PROMPT =
+  /\brule\s*:|\bbased\s+(?:only\s+)?on\s+the\s+rule\b|\bcan\s+we\s+conclude\b|\banswer\s+yes\s+or\s+no\b/i;
+
 export function isProductEngineeringPlanningPrompt(input: string): boolean {
+  if (RULE_INFERENCE_PROMPT.test(input)) return false;
   return hasProductEngineeringSignal(input) && !hasExplicitSoftwareExecutionAnchor(input);
 }

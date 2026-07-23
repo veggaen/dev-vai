@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ConversationSummary } from '@vai/api-types/responses';
+import type { ConversationSummary } from '@vai/contracts/responses';
 import { pickLatestProjectConversation } from './project-conversation.js';
 
 function conversation(

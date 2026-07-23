@@ -33,6 +33,12 @@ describe('tryEmitBoundaryResponse', () => {
     expect(response).not.toMatch(/I found the best plumber is/i);
   });
 
+  it('does not block a named restaurant practical-detail lookup', () => {
+    expect(tryEmitBoundaryResponse({
+      content: 'Can you find the current menu for the Jafs restaurant closest to Helsfyr?',
+    })).toBeNull();
+  });
+
   it('gives shopping criteria without pretending current listings', () => {
     const response = tryEmitBoundaryResponse({ content: 'What laptop should I buy under $800 for coding and school?' });
     expect(response).toMatch(/RAM|SSD|battery|keyboard|screen|CPU/i);

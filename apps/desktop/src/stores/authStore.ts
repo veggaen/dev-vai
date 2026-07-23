@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { apiFetch, API_BASE, getApiSessionToken, setApiSessionToken } from '../lib/api.js';
+import { apiFetch, API_BASE, persistApiSessionToken } from '../lib/api.js';
 
 interface AuthUser {
   id: string;
@@ -135,7 +135,7 @@ async function pollForDeviceApproval(deviceCode: string, intervalSeconds: number
       const payload = await response.json() as DeviceLinkPollResponse;
       if (payload.status === 'approved') {
         if (payload.sessionToken) {
-          setApiSessionToken(payload.sessionToken);
+          await persistApiSessionToken(payload.sessionToken);
         }
         return;
       }
@@ -203,12 +203,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await apiFetch('/api/auth/me');
       const payload = await response.json() as AuthBootstrap;
-      // The runtime explicitly says we're anonymous while we still hold a bearer
-      // token — that token is dead (revoked/expired server-side). Drop it so the
-      // next sign-in starts clean instead of sending a corpse with every request.
-      if (payload.enabled && !payload.authenticated && getApiSessionToken()) {
-        setApiSessionToken(null);
-      }
+      // Preserve the protected desktop credential when one runtime reports
+      // anonymous. Debug/release secret mismatches can make a valid token
+      // temporarily unverifiable. A new login replaces it; only logout clears it.
       set(resolveBootstrap(payload));
     } catch {
       // Network failure — the runtime is unreachable (starting up / restarting).
@@ -272,17 +269,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    await apiFetch('/api/auth/logout', { method: 'POST' });
-    setApiSessionToken(null);
-    set({
-      user: null,
-      role: 'builder',
-      isOwner: false,
-      ownerFeaturesHidden: false,
-      browserLinking: false,
-      status: 'anonymous',
-      error: null,
-    });
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      // Logging out this desktop must clear its local protected credential even
+      // if the runtime is temporarily unreachable.
+      await persistApiSessionToken(null);
+      set({
+        user: null,
+        role: 'builder',
+        isOwner: false,
+        ownerFeaturesHidden: false,
+        browserLinking: false,
+        status: 'anonymous',
+        error: null,
+      });
+    }
   },
 
   setOwnerFeaturesHidden: (hidden) => {

@@ -2,6 +2,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
+import { PERSISTED_NAMES } from '@vai/constants';
 import { createServer } from './server.js';
 import { startLocalDirectChatListener } from './local-pipe-chat.js';
 import { resolveRuntimePrewarmPlan } from './prewarm.js';
@@ -90,7 +91,7 @@ async function isHealthyRuntime(port: number): Promise<boolean> {
   }
 }
 
-const LOCK_FILE = path.resolve(process.cwd(), '.vai-runtime.lock');
+const LOCK_FILE = path.resolve(process.cwd(), PERSISTED_NAMES.runtimeLock);
 
 function writeLockFile(port: number): void {
   try {

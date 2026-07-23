@@ -1,3 +1,15 @@
+import { z } from 'zod';
+import {
+  agentSessionSchema,
+  contextSummarySchema,
+  conversationScoreSchema,
+  learningReportSchema,
+  pinnedNoteSchema,
+  searchResultSchema,
+  sessionAnalysisSchema,
+  sessionEventSchema,
+  sessionInsightsAggregateSchema,
+} from './session-models.js';
 import type {
   AgentSession,
   ContextSummary,
@@ -8,7 +20,7 @@ import type {
   SessionAnalysis,
   SessionEvent,
   SessionInsightsAggregate,
-} from '@vai/core/browser';
+} from './session-models.js';
 
 /**
  * Shared session response types.
@@ -63,3 +75,31 @@ export type SessionIntelligenceResponse = {
 };
 
 export type SessionInsightsResponse = SessionInsightsAggregate;
+
+export const sessionListResponseSchema = z.object({
+  sessions: z.array(agentSessionSchema), total: z.number().int().nonnegative(),
+}).strict();
+export const sessionContextResponseSchema = contextSummarySchema;
+export const sessionDetailResponseSchema = z.object({
+  session: agentSessionSchema, eventCount: z.number().int().nonnegative(),
+}).strict();
+export const createSessionResponseSchema = agentSessionSchema;
+export const importSessionResponseSchema = z.object({ id: z.string(), success: z.boolean() }).strict();
+export const sessionExportResponseSchema = z.object({
+  session: agentSessionSchema, events: z.array(sessionEventSchema),
+}).strict();
+export const sessionEventListResponseSchema = z.array(sessionEventSchema);
+export const sessionSearchResponseSchema = z.object({
+  results: z.array(searchResultSchema), total: z.number().int().nonnegative(),
+}).strict();
+export const sessionPinnedEventsResponseSchema = z.object({
+  events: z.array(sessionEventSchema), total: z.number().int().nonnegative(),
+}).strict();
+export const sessionPinnedNotesResponseSchema = z.object({
+  notes: z.array(pinnedNoteSchema), total: z.number().int().nonnegative(),
+}).strict();
+export const sessionIntelligenceResponseSchema = z.object({
+  score: conversationScoreSchema.nullable(), report: learningReportSchema.nullable(),
+  analysis: sessionAnalysisSchema.nullable(),
+}).strict();
+export const sessionInsightsResponseSchema = sessionInsightsAggregateSchema;

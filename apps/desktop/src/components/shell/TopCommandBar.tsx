@@ -6,7 +6,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { Settings, UserRound } from 'lucide-react';
+import { PanelLeft, Settings, UserRound } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLayoutStore } from '../../stores/layoutStore.js';
 import { useEngineStore } from '../../stores/engineStore.js';
@@ -16,7 +16,7 @@ import { UserPopover } from '../UserPopover.js';
 import { VaiMark } from '../brand/VaiMark.js';
 
 export function TopCommandBar() {
-  const { activePanel, setActivePanel, setShowQuickSwitch } = useLayoutStore();
+  const { activePanel, setActivePanel, setShowQuickSwitch, sidebarState, toggleSidebar } = useLayoutStore();
   const { status: engineStatus } = useEngineStore();
   const authStatus = useAuthStore((state) => state.status);
   const role = useAuthStore((state) => state.role);
@@ -55,6 +55,21 @@ export function TopCommandBar() {
         <span className="hidden font-display text-[12.5px] font-semibold tracking-tight text-[color:var(--fg)] md:inline">
           Vai
         </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        title={sidebarState === 'expanded' ? 'Collapse sidebar (Ctrl+B)' : 'Expand sidebar (Ctrl+B)'}
+        aria-label={sidebarState === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar'}
+        aria-pressed={sidebarState === 'expanded'}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${
+          sidebarState === 'expanded'
+            ? 'text-[color:var(--fg)]'
+            : 'text-[color:var(--color-muted)] hover:bg-[color:var(--panel)]/70 hover:text-[color:var(--fg)]'
+        }`}
+      >
+        <PanelLeft className="h-3.5 w-3.5" aria-hidden />
       </button>
 
       <div className="top-command-tabs flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-x-auto" role="tablist">

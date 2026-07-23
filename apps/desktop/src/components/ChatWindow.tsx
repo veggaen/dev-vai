@@ -71,6 +71,7 @@ import {
 import { IdeMentionMenu } from './IdeMentionMenu.js';
 import { pickSandboxContextPaths, shouldAttachSandboxContext } from '../lib/sandbox-context.js';
 import { detectPastedFileExtension, shouldAttachTextPaste } from '../lib/composer-paste.js';
+import { LIMITS, PERSISTED_NAMES } from '@vai/constants';
 
 /** Fallback chat apps when the extension hasn't reported yet */
 const FALLBACK_CHAT_APPS: { id: string; label: string }[] = [
@@ -164,13 +165,70 @@ function isDraftEmpty(d: ComposerDraft): boolean {
     && !d.imageMode;
 }
 
+function loadComposerDrafts(): Map<string, ComposerDraft> {
+  if (typeof localStorage === 'undefined') return new Map();
+  try {
+    const raw = localStorage.getItem(PERSISTED_NAMES.composerDrafts);
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw) as Record<string, Partial<ComposerDraft>>;
+    return new Map(Object.entries(parsed).flatMap(([id, draft]) => {
+      if (!draft || typeof draft.input !== 'string') return [];
+      return [[id, {
+        input: draft.input.slice(0, LIMITS.composerDraftCharacters), pastedImage: null,
+        attachedFiles: Array.isArray(draft.attachedFiles) ? draft.attachedFiles.slice(0, LIMITS.composerAttachmentFiles) as FileAttachment[] : [],
+        imageDescription: typeof draft.imageDescription === 'string' ? draft.imageDescription : '',
+        imageQuestion: typeof draft.imageQuestion === 'string' ? draft.imageQuestion : '', imageMode: Boolean(draft.imageMode),
+      } satisfies ComposerDraft] as const];
+    }));
+  } catch { return new Map(); }
+}
+
+function saveComposerDrafts(drafts: Map<string, ComposerDraft>): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const serializable = Object.fromEntries([...drafts].map(([id, draft]) => [id, {
+      ...draft, pastedImage: null,
+      input: draft.input.slice(0, LIMITS.composerDraftCharacters),
+      attachedFiles: draft.attachedFiles.filter((file) => file.content.length <= LIMITS.composerDraftCharacters),
+    }]));
+    if (Object.keys(serializable).length === 0) localStorage.removeItem(PERSISTED_NAMES.composerDrafts);
+    else localStorage.setItem(PERSISTED_NAMES.composerDrafts, JSON.stringify(serializable));
+  } catch { /* quota or privacy mode: in-memory draft still survives chat switches */ }
+}
+
 const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 240;
+
+/**
+ * "Today" / "Yesterday" / "July 12" chip label between messages when the
+ * calendar day changes — an at-a-glance timeline for long-running chats.
+ * Returns null when the previous message is the same day (or no timestamp).
+ */
+function daySeparatorLabel(prevIso: string | undefined, iso: string | undefined): string | null {
+  if (!iso) return null;
+  const current = new Date(iso);
+  if (Number.isNaN(current.getTime())) return null;
+  if (prevIso) {
+    const prev = new Date(prevIso);
+    if (!Number.isNaN(prev.getTime()) && prev.toDateString() === current.toDateString()) return null;
+  }
+  const now = new Date();
+  if (current.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (current.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return current.toLocaleDateString([], {
+    month: 'long',
+    day: 'numeric',
+    ...(current.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+  });
+}
 
 export function ChatWindow() {
   const {
     messages,
     activeConversationId,
+    conversationsHydrated,
     isStreaming,
     sendMessage,
     sendBroadcast,
@@ -233,6 +291,7 @@ export function ChatWindow() {
   const [imageDescription, setImageDescription] = useState('');
   const [imageQuestion, setImageQuestion] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
+  const [fileDragActive, setFileDragActive] = useState(false);
   /** Explicit "Image" output mode — when on, this turn is answered with a generated image. */
   const [imageMode, setImageMode] = useState(false);
 
@@ -240,8 +299,8 @@ export function ChatWindow() {
   // Each chat keeps its OWN composer contents (text, pasted image, attached
   // files) so switching between chats preserves what you were assembling in
   // each — e.g. three different images staged across three chats. Kept in an
-  // in-memory map for the app session (not persisted to disk).
-  const composerDraftsRef = useRef<Map<string, ComposerDraft>>(new Map());
+  // local-first map: text/file drafts survive disconnects and app restarts.
+  const composerDraftsRef = useRef<Map<string, ComposerDraft>>(loadComposerDrafts());
   const prevConvIdRef = useRef<string | null>(activeConversationId);
   // Latest composer values, mirrored every render so the swap effect reads fresh
   // state without re-subscribing.
@@ -249,6 +308,13 @@ export function ChatWindow() {
     input, pastedImage, attachedFiles, imageDescription, imageQuestion, imageMode,
   });
   draftValuesRef.current = { input, pastedImage, attachedFiles, imageDescription, imageQuestion, imageMode };
+  useEffect(() => {
+    if (!activeConversationId) return;
+    const draft = draftValuesRef.current;
+    if (isDraftEmpty(draft)) composerDraftsRef.current.delete(activeConversationId);
+    else composerDraftsRef.current.set(activeConversationId, { ...draft, attachedFiles: [...draft.attachedFiles] });
+    saveComposerDrafts(composerDraftsRef.current);
+  }, [activeConversationId, input, attachedFiles, imageDescription, imageQuestion, imageMode, pastedImage]);
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute>('vai');
   const [broadcastModel, setBroadcastModel] = useState('gpt-4o');
   const [broadcastChatApp, setBroadcastChatApp] = useState('chat');
@@ -590,7 +656,7 @@ export function ChatWindow() {
       toggleBuilderPanel();
     }
   // Only trigger on new assistant message arrival (messages.length change)
-  }, [messages.length]);  
+  }, [messages.length]);
   useEffect(() => {
     setHasActiveProject(!!sandboxProjectId);
     // Reset context hash so the next message always sends the full file tree for this project.
@@ -608,6 +674,7 @@ export function ChatWindow() {
       const outgoing = draftValuesRef.current;
       if (isDraftEmpty(outgoing)) composerDraftsRef.current.delete(prevId);
       else composerDraftsRef.current.set(prevId, { ...outgoing, attachedFiles: [...outgoing.attachedFiles] });
+      saveComposerDrafts(composerDraftsRef.current);
     }
     const incoming = nextId ? composerDraftsRef.current.get(nextId) : undefined;
     setInput(incoming?.input ?? '');
@@ -964,10 +1031,11 @@ export function ChatWindow() {
     }
   }, [attachedFiles.length, input]);
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    Array.from(files).forEach((file) => {
+  const attachLocalFiles = useCallback((files: readonly File[]) => {
+    const available = Math.max(0, LIMITS.composerAttachmentFiles - attachedFiles.length);
+    const accepted = files.slice(0, available).filter((file) => file.size <= LIMITS.composerAttachmentBytes);
+    const skipped = files.length - accepted.length;
+    accepted.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => {
         const content = reader.result as string;
@@ -979,8 +1047,15 @@ export function ChatWindow() {
       };
       reader.readAsText(file);
     });
+    if (skipped > 0) toast.warning(`${skipped} file${skipped === 1 ? '' : 's'} skipped · limit ${LIMITS.composerAttachmentFiles} files, ${Math.round(LIMITS.composerAttachmentBytes / 1024 / 1024)} MB each`);
+  }, [attachedFiles.length]);
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    attachLocalFiles(Array.from(files));
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+  }, [attachLocalFiles]);
 
   const removeFile = useCallback((id: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
@@ -1022,6 +1097,7 @@ export function ChatWindow() {
   };
 
   const handleSend = async (overrideText?: string, options?: SendOptions) => {
+    if (!conversationsHydrated) return;
     const isOverrideSend = typeof overrideText === 'string';
     const text = (overrideText ?? input).trim();
     // Mid-stream submits become a queued follow-up rather than a no-op, so the
@@ -1330,7 +1406,7 @@ export function ChatWindow() {
   };
 
   const charCount = input.length;
-  const canSend = input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
+  const canSend = conversationsHydrated && input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
   const shellModeLabel = `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
   const headerTitle = hasMessages ? 'Workspace' : 'Vai';
@@ -1641,6 +1717,7 @@ export function ChatWindow() {
                     && msg.role === 'assistant'
                     && Boolean(msg.followUps?.length)
                     && messages.some((m) => m.role === 'assistant' && Boolean(m.sources?.length));
+                  const separatorLabel = daySeparatorLabel(messages[idx - 1]?.createdAt, msg.createdAt);
                   return (
                     <motion.div
                       key={msg.id}
@@ -1648,6 +1725,15 @@ export function ChatWindow() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                     >
+                      {separatorLabel && (
+                        <div className="mb-6 mt-2 flex items-center gap-3" role="separator" aria-label={separatorLabel}>
+                          <span className="h-px flex-1 bg-[color:var(--border)] opacity-60" />
+                          <span className="rounded-full border border-[color:var(--border)] bg-[color:var(--panel)] px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--color-muted)]">
+                            {separatorLabel}
+                          </span>
+                          <span className="h-px flex-1 bg-[color:var(--border)] opacity-60" />
+                        </div>
+                      )}
                       <MessageBubble
                         role={msg.role}
                         content={msg.content}
@@ -1691,6 +1777,22 @@ export function ChatWindow() {
                         sourceRailOpen={sourceRailHandlesSources && isConversationSourcesOpen}
                         onOpenSources={sourceRailHandlesSources ? () => setIsConversationSourcesOpen(true) : undefined}
                         followUpsHandledBySidebar={followUpsHandledBySidebar}
+                        createdAt={msg.createdAt}
+                        onEdit={msg.role === 'user' ? (text) => {
+                          setInput(text);
+                          requestAnimationFrame(() => {
+                            const ta = textareaRef.current;
+                            if (ta) {
+                              ta.focus();
+                              ta.setSelectionRange(ta.value.length, ta.value.length);
+                            }
+                          });
+                        } : undefined}
+                        onRetry={
+                          msg.role === 'assistant' && isLatestMessage && !isStreaming
+                            ? () => useChatStore.getState().regenerateLastTurn()
+                            : undefined
+                        }
                       />
                     </motion.div>
                   );
@@ -1800,10 +1902,29 @@ export function ChatWindow() {
               after release and must not keep the ring lit. */}
           <motion.div
             data-dictation-active={dictation.listening || globalDictationListening ? 'true' : undefined}
+            data-file-drag-active={fileDragActive ? 'true' : undefined}
+            onDragEnter={(event) => {
+              if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setFileDragActive(true); }
+            }}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setFileDragActive(true); }
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFileDragActive(false);
+            }}
+            onDrop={(event) => {
+              event.preventDefault(); setFileDragActive(false);
+              attachLocalFiles(Array.from(event.dataTransfer.files));
+            }}
             className={`composer-shell relative flex flex-col transition-[border-color,box-shadow] duration-200 ${
               deliveryRoute === 'broadcast' && studioBuilderChrome ? 'border-blue-200' : ''
-            }`}
+            } ${fileDragActive ? 'border-[color:var(--accent)] ring-2 ring-[color:var(--accent-ring)]' : ''}`}
           >
+            {fileDragActive && (
+              <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-[inherit] bg-[color:var(--panel)]/90 text-xs font-medium text-[color:var(--fg)] backdrop-blur-sm">
+                Drop files into this agent input
+              </div>
+            )}
             <AnimatePresence initial={false}>
               {deliveryRoute === 'broadcast' && (
                 <BroadcastStrip
@@ -1882,6 +2003,7 @@ export function ChatWindow() {
               aria-live={dictation.listening || globalDictationListening || dictation.status === 'transcribing' ? 'polite' : undefined}
               data-dictation-active={dictation.listening || globalDictationListening || liveDictation.isActive() ? 'true' : undefined}
               value={input}
+              disabled={!conversationsHydrated}
               onChange={(e) => {
                 const v = e.target.value;
                 const pos = e.target.selectionStart ?? v.length;
@@ -1937,7 +2059,9 @@ export function ChatWindow() {
                 }
               }}
               placeholder={
-                pastedImage
+                !conversationsHydrated
+                  ? 'Restoring your last chat...'
+                  : pastedImage
                   ? 'Describe what you need help with...'
                   : deliveryRoute === 'broadcast'
                     ? `Message ${onlineIdeCount} connected IDE${onlineIdeCount === 1 ? '' : 's'}...${onlineIdeCount > 0 ? ' · @ route' : ''}`
@@ -1946,7 +2070,7 @@ export function ChatWindow() {
                       : MODE_PLACEHOLDERS[mode]
               }
               rows={1}
-              className={`resize-none overflow-y-auto bg-transparent px-4 pb-2.5 pt-2.5 text-sm leading-relaxed transition-shadow duration-200 focus:outline-none ${studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'}`}
+              className={`resize-none overflow-y-auto bg-transparent px-4 pb-2.5 pt-2.5 text-sm leading-relaxed transition-shadow duration-200 focus:outline-none disabled:cursor-wait disabled:opacity-60 ${studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'}`}
               style={{ minHeight: `${MIN_INPUT_HEIGHT}px`, maxHeight: `${MAX_INPUT_HEIGHT}px` }}
             />
             {mentionAt !== null && textareaRef.current && (
@@ -2272,4 +2396,3 @@ export function ChatWindow() {
     </div>
   );
 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           

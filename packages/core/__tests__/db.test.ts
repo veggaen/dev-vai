@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createDb, getRawDb, resetDbInstance } from '../src/db/client.js';
-import { conversations, evalRuns, messages } from '../src/db/schema.js';
+import { conversations, councilWorkArtifacts, evalRuns, messages } from '../src/db/schema.js';
 import type { VaiDatabase } from '../src/db/client.js';
 import { ulid } from 'ulid';
 
@@ -69,6 +69,39 @@ describe('Database', () => {
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('Hello VAI');
     expect(msgs[0].role).toBe('user');
+  });
+
+  it('persists a model-neutral Council work artifact for later turns', () => {
+    const convId = ulid();
+    const now = new Date();
+    db.insert(conversations).values({
+      id: convId,
+      title: 'Book Tracker',
+      modelId: 'vai:v0',
+      sandboxProjectId: 'book-tracker',
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+    db.insert(councilWorkArtifacts).values({
+      id: ulid(),
+      conversationId: convId,
+      sandboxProjectId: 'book-tracker',
+      projectName: 'book-tracker',
+      brief: 'Retry the withheld edit.',
+      files: JSON.stringify([{ path: 'src/App.tsx', content: 'export default function App() { return null; }' }]),
+      validation: JSON.stringify({ ok: true, errors: [], softErrors: [], warnings: [], checker: 'tsc' }),
+      reviews: JSON.stringify([{ memberId: 'local:qwen3:8b', verdict: 'needs-work', mustFix: ['Improve the cover art.'], notes: [] }]),
+      repairsUsed: 2,
+      memberIds: JSON.stringify(['local:qwen2.5-coder:7b', 'local:qwen3:8b']),
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    const artifact = db.select().from(councilWorkArtifacts).where(eq(councilWorkArtifacts.conversationId, convId)).get();
+    expect(artifact?.projectName).toBe('book-tracker');
+    expect(JSON.parse(artifact!.files)).toHaveLength(1);
+    expect(JSON.parse(artifact!.reviews)[0].mustFix).toEqual(['Improve the cover art.']);
   });
 
   it('stores and retrieves tool calls as JSON', () => {

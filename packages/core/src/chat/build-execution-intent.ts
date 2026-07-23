@@ -132,4 +132,18 @@ export function looksLikeFactualQuestion(content: string): boolean {
   const text = (content || '').trim();
   if (!text) return false;
   // An explicit build request is never "just a question".
-  if (isExplicitBuildExecutionRequest(text)) retu
+  if (isExplicitBuildExecutionRequest(text)) return false;
+  // Interrogative lead OR a fresh-data ask, AND reasonably short (real questions are).
+  const wordCount = text.split(/\s+/).length;
+  const interrogative = FACTUAL_QUESTION_LEAD.test(text) || text.endsWith('?');
+  // A build/make/create verb anywhere disqualifies it (so "how do I build a price widget"
+  // is a build question, not a fresh-data lookup) — EXCEPT when the text is a clean
+  // interrogative that merely *mentions* a build gerund ("what's a great idea when CREATING
+  // a company in Norway?"). Imperative build asks ("how do I build X") are caught by
+  // EXPLICIT_BUILD_REQUEST / FACTUAL exclusion below, so the question form stays factual.
+  // This is the fix for the Norway opportunity question that "creating" wrongly disqualified.
+  if (EXPLICIT_BUILD_REQUEST.test(text)) return false;
+  if (BUILD_VERB_ANYWHERE.test(text) && !interrogative) return false;
+  const freshData = FRESH_DATA_LEAD.test(text);
+  return (interrogative || freshData) && wordCount <= 40;
+}

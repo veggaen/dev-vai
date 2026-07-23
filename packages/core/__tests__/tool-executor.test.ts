@@ -12,6 +12,7 @@ function makeTool(name: string, handler: (args: Record<string, unknown>) => stri
     name,
     description: `Test tool: ${name}`,
     parameters: { type: 'object', properties: {} },
+    requiredCapabilities: ['read'],
     async execute(args) {
       const output = await handler(args);
       return { success: !opts?.fail, output };
@@ -75,7 +76,7 @@ describe('ToolExecutor', () => {
       return 'done-slow';
     }));
     registry.register(makeTool('fail_tool', () => 'oops', { fail: true }));
-    executor = new ToolExecutor(registry);
+    executor = new ToolExecutor(registry, { workspaceScope: 'full', sessionScope: 'full' });
   });
 
   // ── Single Tool Execution ──

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildProcessTree, shouldAutoExpand, resolveDwellCollapse, MIN_STEP_DWELL_MS,
+  buildProcessTree, buildTimeSpectrum, shouldAutoExpand, resolveDwellCollapse, MIN_STEP_DWELL_MS,
   planStaggeredReveal, activeRevealIndex, STAGGER_STEP_MS, STAGGER_MAX_TOTAL_MS,
 } from './ProcessTree.logic.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
@@ -407,5 +407,32 @@ describe('buildProcessTree — verification spine (grounding) node', () => {
   it('omits the row when no context was used (verdict none / total 0)', () => {
     const none = { ...council, provenance: { ...council.provenance, total: 0 } };
     expect(buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], none).some((n) => n.id === 'council-provenance')).toBe(false);
+  });
+});
+
+describe('buildTimeSpectrum — the settled "where did the time go" strip', () => {
+  const step = (stage: string, durationMs?: number): ChatProgressStep =>
+    ({ stage, label: stage, status: 'done', durationMs } as ChatProgressStep);
+
+  it('produces proportional, tone-tagged segments from timed steps', () => {
+
+    const segs = buildTimeSpectrum([step('search', 3000), step('council-vai', 6000), step('verify', 1000)]);
+    expect(segs.length).toBe(3);
+    expect(segs[1].tone).toBe('council');
+    expect(segs[1].share).toBeCloseTo(0.6, 5);
+    expect(segs.reduce((s, x) => s + x.share, 0)).toBeCloseTo(1, 5);
+  });
+
+  it('merges sub-1% slivers into the previous segment', () => {
+
+    const segs = buildTimeSpectrum([step('search', 10000), step('verify', 50), step('council-vai', 5000)]);
+    expect(segs.length).toBe(2);
+    expect(segs[0].ms).toBe(10050);
+  });
+
+  it('returns nothing for un-timed or single-step turns (no fake data)', () => {
+
+    expect(buildTimeSpectrum([step('search'), step('verify')])).toEqual([]);
+    expect(buildTimeSpectrum([step('search', 2000)])).toEqual([]);
   });
 });

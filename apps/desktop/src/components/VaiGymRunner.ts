@@ -11,9 +11,7 @@
 
 import { useVaiGymStore, FOUNDATIONS } from '../stores/vaiGymStore.js';
 import { useCursorStore } from '../stores/cursorStore.js';
-
-
-const API_BASE = 'http://localhost:3006';
+import { API_BASE } from '../lib/api.js';
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 

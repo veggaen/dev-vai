@@ -48,6 +48,8 @@ export interface UseVoiceDictationOptions {
   /** Engine override (defaults to the zero-dep Web Speech adapter). */
   readonly adapter?: SttAdapter;
   readonly lang?: string;
+  /** Pin the STT tier. Global/game PTT uses `fast` to keep release latency bounded. */
+  readonly sttQuality?: 'fast' | 'balanced' | 'best';
   /** Preferred mic (from the device picker). Omit to use the system default. */
   readonly deviceId?: string;
   /**
@@ -61,8 +63,26 @@ export interface UseVoiceDictationOptions {
    * end an active pointer-held session.
    */
   readonly keyboardHold?: boolean;
+  /** Skip model polish on latency-critical global/game PTT. */
+  readonly polishBeforeFinal?: boolean;
+  /**
+   * Preserve the adapter's final text byte-for-byte after non-speech annotation
+   * removal. This exists only for deterministic native acceptance fixtures: it
+   * prevents a persisted speech profile, casing, fillers, or punctuation rules
+   * from changing the predeclared nonce that the target must observe exactly.
+   */
+  readonly preserveRawFinal?: boolean;
   /** Don't start dictation while a turn is streaming (composer is busy steering). */
   readonly disabled?: boolean;
+}
+
+export function prepareBaselineTranscript(
+  raw: string,
+  preserveRawFinal = false,
+): { readonly text: string; readonly applied: readonly AppliedReplacement[] } {
+  if (preserveRawFinal) return { text: raw, applied: [] };
+  const { text: corrected, applied } = applyProfile(raw, loadProfile());
+  return { text: prettifyTranscript(corrected) || raw, applied };
 }
 
 const defaultHoldChord = (e: KeyboardEvent): boolean => e.altKey && e.metaKey;
@@ -97,9 +117,12 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     onCancel,
     adapter = autoSttAdapter,
     lang = 'en-US',
+    sttQuality,
     deviceId,
     holdChord = defaultHoldChord,
     keyboardHold = true,
+    polishBeforeFinal = true,
+    preserveRawFinal = false,
     disabled = false,
   } = options;
   const [status, setStatus] = useState<DictationStatus>(() => (adapter.isAvailable() ? 'idle' : 'unsupported'));
@@ -134,9 +157,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
         // Groom: learned corrections first (so prettify sees the right words), then
         // the deterministic prettify pass. Zero latency, model-free — the council/
         // model hook point for a deeper groom sits AFTER this baseline.
-        const { text: corrected, applied } = applyProfile(raw, loadProfile());
-        const groomed = prettifyTranscript(corrected);
-        const groomedText = groomed || raw;
+        const { text: groomedText, applied } = prepareBaselineTranscript(raw, preserveRawFinal);
         cbRef.current.onPolishing?.(groomedText);
         // Wait BRIEFLY for the model polish, then land the text EXACTLY ONCE. The old
         // behavior landed groomed text instantly and rewrote it seconds later, which
@@ -144,7 +165,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
         // until the final text is ready — bounded so it still appears within ~2.5s of
         // release; if polish is slow, groomed lands and is never mutated afterwards.
         let landed = groomedText;
-        try {
+        if (!preserveRawFinal && polishBeforeFinal) try {
           const polished = await Promise.race([
             polishTranscript(groomedText),
             new Promise<null>((resolve) => window.setTimeout(() => resolve(null), POLISH_LAND_CAP_MS)),
@@ -180,7 +201,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     } finally {
       setStatus(supported ? 'idle' : 'unsupported');
     }
-  }, [supported]);
+  }, [polishBeforeFinal, preserveRawFinal, supported]);
 
   const start = useCallback(async () => {
     if (disabled || !supported) return;
@@ -194,6 +215,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     try {
       const session = await adapter.start({
         lang,
+        quality: sttQuality,
         deviceId,
         onPartial: (p) => {
           if (generationRef.current === generation) cbRef.current.onInterim?.(p.transcript);
@@ -223,7 +245,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     } finally {
       startingRef.current = false;
     }
-  }, [adapter, disabled, lang, deviceId, supported, finalizeSession]);
+  }, [adapter, disabled, lang, sttQuality, deviceId, supported, finalizeSession]);
 
   const stop = useCallback(async () => {
     const session = sessionRef.current;
@@ -268,7 +290,9 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
       }
     };
     // A lost window (alt-tab) must not leave the mic hot.
-    const onBlur = () => { if (sessionRef.current || startingRef.current) void stop(); };
+    const onBlur = () => {
+      if (keyboardHold && (sessionRef.current || startingRef.current)) void stop();
+    };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);

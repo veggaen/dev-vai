@@ -5,7 +5,7 @@ import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore
 import { useProcessChildReveal } from '../../hooks/useProcessChildReveal.js';
 import { useAnimatedEllipsis } from '../../hooks/useAnimatedEllipsis.js';
 import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
-import { buildProcessTree, isExpandable, shouldAutoExpand, resolveDwellCollapse, planStaggeredReveal, activeRevealIndex, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
+import { buildProcessTree, buildTimeSpectrum, isExpandable, shouldAutoExpand, resolveDwellCollapse, planStaggeredReveal, activeRevealIndex, type ProcessNode, type ProcessTone, type SpectrumSegment } from './ProcessTree.logic.js';
 import { ProcessTreeCopyActions } from './ProcessTreeCopyActions.js';
 import { copyProcessText } from './ProcessTree.copy.js';
 import { humanizeLiveTail } from './process-humanize.js';
@@ -33,6 +33,46 @@ type TreePhase = 'live' | 'settling' | 'settled';
 
 const ease = [0.25, 0.1, 0.25, 1] as const;
 const SETTLE_MS = 340;
+
+/** Tone → phase color variable (same palette as the thinking-phase fills). */
+const SPECTRUM_TONE_VAR: Record<ProcessTone, string> = {
+  default: 'var(--phase-read)',
+  tool: 'var(--phase-read)',
+  search: 'var(--phase-evidence)',
+  council: 'var(--phase-route)',
+  image: 'var(--phase-route)',
+  compose: 'var(--phase-compose)',
+  build: 'var(--phase-compose)',
+  verify: 'var(--phase-verify)',
+};
+
+/**
+ * TimeSpectrum — the settled summary's "where did the time go" strip.
+ * Proportional segments, phase-colored, each hoverable for the exact step +
+ * duration. Pure presentation of buildTimeSpectrum's data — no animation, no
+ * gradient, one quiet instrument.
+ */
+function TimeSpectrum({ segments }: { segments: readonly SpectrumSegment[] }) {
+  if (segments.length < 2) return null;
+  return (
+    <span
+      className="mx-1 inline-flex h-[3px] w-24 shrink-0 items-stretch gap-px overflow-hidden rounded-full opacity-80 transition-opacity group-hover:opacity-100"
+      role="img"
+      aria-label={`Time by phase: ${segments.map((s) => s.label).join(', ')}`}
+    >
+      {segments.map((seg, i) => (
+        <span
+          key={`${seg.stage}-${i}`}
+          title={seg.label}
+          style={{
+            width: `${Math.max(2, seg.share * 100)}%`,
+            background: `color-mix(in oklab, ${SPECTRUM_TONE_VAR[seg.tone]} 78%, transparent)`,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
 
 function nodeTone(tone: ProcessTone | undefined): VaiNodeProps['tone'] {
   switch (tone) {
@@ -79,6 +119,7 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
   if (!hasNodes && phase === 'settled') return null;
 
   const summary = buildSummaryLine(nodes, durationMs);
+  const spectrum = buildTimeSpectrum(steps);
   const showExpandedTree = phase === 'live' || phase === 'settling' || (phase === 'settled' && open);
   const treeLive = phase === 'live';
   const settledExpanded = phase === 'settled' && open;
@@ -101,6 +142,7 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
             <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
             <VaiNode state="done" size={9} />
             <span className="min-w-0 flex-1 truncate text-[11px]">{summary}</span>
+            <TimeSpectrum segments={spectrum} />
             {summaryDuration !== undefined && (
               <span className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)]">{formatMs(summaryDuration)}</span>
             )}

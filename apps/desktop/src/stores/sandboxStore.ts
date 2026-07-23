@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ProjectHandoffConsumeResponse } from '@vai/api-types/project-responses';
+import type { ProjectHandoffConsumeResponse } from '@vai/contracts/project-responses';
 import { apiFetch } from '../lib/api.js';
 import { useLayoutStore } from './layoutStore.js';
 
@@ -1013,4 +1013,6 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       if (deployAbortController === controller) {
         deployAbortController = null;
       }
-    
+    }
+  },
+}));

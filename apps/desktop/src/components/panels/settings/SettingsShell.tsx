@@ -3,6 +3,7 @@
  * Rendered inside the wide SettingsDrawer (~80% viewport).
  */
 
+import { useMemo, useState } from 'react';
 import type { ReactNode, SelectHTMLAttributes } from 'react';
 import {
   Palette,
@@ -13,7 +14,10 @@ import {
   User,
   Mic,
   Pencil,
+  Search,
   Settings2,
+  ShieldCheck,
+  X as XIcon,
 } from 'lucide-react';
 import {
   isThemeCardActive,
@@ -26,6 +30,7 @@ export type SettingsTabId =
   | 'ai'
   | 'voice'
   | 'integrations'
+  | 'operations'
   | 'engine'
   | 'shortcuts'
   | 'account';
@@ -42,10 +47,40 @@ const NAV_ITEMS: SettingsNavItem[] = [
   { id: 'ai', label: 'AI defaults', icon: Bot },
   { id: 'voice', label: 'Voice', icon: Mic },
   { id: 'integrations', label: 'Integrations', icon: Link2 },
+  { id: 'operations', label: 'Workspace & trust', icon: ShieldCheck },
   { id: 'engine', label: 'Engine', icon: Cog, ownerOnly: true },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
   { id: 'account', label: 'Account', icon: User, ownerOnly: true },
 ];
+
+/**
+ * Searchable keyword index per settings section, so typing "mic", "hotkey" or
+ * "dark mode" finds the right tab even when the word isn't in the tab label.
+ * Kept here (next to NAV_ITEMS) so a new section must add its keywords in the
+ * same place it registers its nav entry.
+ */
+const SETTINGS_SEARCH_INDEX: Record<SettingsTabId, string> = {
+  appearance:
+    'appearance theme themes color colors dark light midnight claude gpt preset custom font density background accent swatch',
+  ai: 'ai defaults model models council roundtable seats depth process quick balanced deep response reasoning system prompt',
+  voice:
+    'voice dictation mic microphone speech speak talk transcribe transcription whisper stt tts text to speech read aloud audio input device vocabulary language',
+  integrations:
+    'integrations connect ollama api key cloud openai anthropic extension browser vscode companion mcp',
+  operations:
+    'workspace trust security capability health degraded environment remote pairing ssh memory skills personas compare sharing publish backlinks graph export hardware models',
+  engine:
+    'engine runtime memory knowledge ingest retrieval index database learning training owner',
+  shortcuts: 'shortcuts keyboard hotkey keys keybinding binding customize send steer',
+  account: 'account profile login sign out email password owner session',
+};
+
+function matchesSettingsQuery(item: SettingsNavItem, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = `${item.label.toLowerCase()} ${SETTINGS_SEARCH_INDEX[item.id] ?? ''}`;
+  return terms.every((term) => haystack.includes(term));
+}
 
 export function SettingsShell({
   activeTab,
@@ -58,11 +93,52 @@ export function SettingsShell({
   showOwnerSections: boolean;
   children: ReactNode;
 }) {
-  const visibleNav = NAV_ITEMS.filter((item) => !item.ownerOnly || showOwnerSections);
+  const [query, setQuery] = useState('');
+  const availableNav = NAV_ITEMS.filter((item) => !item.ownerOnly || showOwnerSections);
+  const visibleNav = useMemo(
+    () => availableNav.filter((item) => matchesSettingsQuery(item, query)),
+    // availableNav is derived from a constant + boolean, so showOwnerSections is the real dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query, showOwnerSections],
+  );
 
   return (
-    <div className="settings-shell flex h-full min-h-0 items-stretch">
-      <nav className="settings-nav flex h-full w-52 shrink-0 flex-col gap-1 self-stretch border-r border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] p-3" aria-label="Settings sections">
+    <div className="settings-shell flex h-full min-h-0 items-stretch max-[640px]:flex-col">
+      <nav className="settings-nav flex h-full w-52 shrink-0 flex-col gap-1 self-stretch border-r border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] p-3 max-[640px]:h-auto max-[640px]:w-full max-[640px]:flex-row max-[640px]:overflow-x-auto max-[640px]:border-b max-[640px]:border-r-0 max-[640px]:p-2" aria-label="Settings sections">
+        <div className="relative mb-2 max-[640px]:hidden">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--color-muted)]" aria-hidden />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) {
+                e.stopPropagation();
+                setQuery('');
+              } else if (e.key === 'Enter' && visibleNav.length > 0) {
+                onTabChange(visibleNav[0].id);
+              }
+            }}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            className="w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--input-bg,var(--panel))] py-2 pl-8 pr-7 text-[12px] text-[color:var(--fg)] placeholder:text-[color:var(--color-muted)] focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent-ring)]"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Clear settings search"
+              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[color:var(--color-muted)] transition-colors hover:text-[color:var(--fg)]"
+            >
+              <XIcon className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        {visibleNav.length === 0 && (
+          <p className="px-3 py-4 text-center text-[11px] leading-5 text-[color:var(--color-muted)]">
+            Nothing matches “{query.trim()}”.
+          </p>
+        )}
         {visibleNav.map((item) => {
           const Icon = item.icon;
           return (
@@ -71,7 +147,7 @@ export function SettingsShell({
             type="button"
             onClick={() => onTabChange(item.id)}
             aria-current={activeTab === item.id ? 'page' : undefined}
-            className={`settings-nav-item flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium ${
+            className={`settings-nav-item flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium max-[640px]:shrink-0 max-[640px]:py-2 ${
               activeTab === item.id
                 ? 'is-active text-[color:var(--fg)]'
                 : 'text-[color:var(--color-muted)] hover:bg-[color:var(--panel)] hover:text-[color:var(--fg)]'
@@ -84,7 +160,7 @@ export function SettingsShell({
         })}
       </nav>
 
-      <div className="settings-panel min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5 md:px-8 md:py-6">
+      <div className="settings-panel min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 md:px-8 md:py-6">
         <div className="mx-auto w-full max-w-3xl">{children}</div>
       </div>
     </div>

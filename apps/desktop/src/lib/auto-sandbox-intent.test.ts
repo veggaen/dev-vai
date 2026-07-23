@@ -305,4 +305,27 @@ describe('shouldStageGeneratedFilesForReview', () => {
   });
 
   it('does not stage when review is disabled', () => {
-    expect(shouldStageGeneratedFilesForReview({ mode: 'builder', requireDiffApproval: 
+    expect(shouldStageGeneratedFilesForReview({ mode: 'builder', requireDiffApproval: false })).toBe(false);
+  });
+});
+
+describe('resolveTerminalNoActionStatus', () => {
+  it('settles a refused attached-project edit without leaving build chrome running', () => {
+    expect(resolveTerminalNoActionStatus({
+      workIntent: 'edit',
+      hasActiveProject: true,
+      assistantContent: "I didn't apply this edit because a blocking issue remains. The current files were left unchanged.",
+    })).toEqual({
+      step: 'ready',
+      message: 'No changes applied — Vai stopped safely and the preview is unchanged.',
+    });
+  });
+
+  it('does not create build status for ordinary Agent conversation', () => {
+    expect(resolveTerminalNoActionStatus({
+      workIntent: 'none',
+      hasActiveProject: true,
+      assistantContent: 'Here is the explanation you requested.',
+    })).toBeNull();
+  });
+});

@@ -1,4 +1,13 @@
-import type { ChatProgressStep } from '@vai/api-types/chat-ws';
+import type { ChatChunk } from '../models/adapter.js';
+
+/**
+ * Core-owned structural view of one streamed progress frame. The runtime may
+ * enrich a core progress frame with an advisor packet before it reaches the
+ * WebSocket; persistence treats that packet as opaque structured metadata.
+ */
+export type ChatProgressStep = NonNullable<ChatChunk['progress']> & {
+  readonly advisor?: Readonly<Record<string, unknown>>;
+};
 
 /**
  * Process-trace persistence (prune ↔ rehydrate).
@@ -35,6 +44,7 @@ export function accumulateProgressStep(
     const prior = existing[priorIndex];
     const identifiesOneLogicalStep = prior?.status === 'running'
       || prior?.label === incoming.label
+      || incoming.stage === 'search'
       || /(?:^|-)round-?\d+(?:$|-)/i.test(incoming.stage);
     if (identifiesOneLogicalStep) {
       const next = [...existing];
@@ -186,4 +196,21 @@ export function deserializeProgressTrace(
   if (!blob) return undefined;
   try {
     const parsed = JSON.parse(blob) as { version?: unknown; steps?: unknown };
-    // Version-1 traces were persisted 
+    // Version-1 traces were persisted before the assistant row existed and were
+    // therefore attached to the preceding answer. They are intentionally not
+    // rendered: missing history is safer than showing another turn's work as fact.
+    if (!parsed || parsed.version !== 2 || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+      return undefined;
+    }
+    // Trust-but-shape: keep only objects with the required stage/label/status.
+    const steps = parsed.steps.filter(
+      (value: unknown): value is ChatProgressStep => {
+        const step = value as Partial<ChatProgressStep> | null;
+        return Boolean(step && typeof step.stage === 'string' && typeof step.label === 'string' && typeof step.status === 'string');
+      },
+    );
+    return steps.length ? steps : undefined;
+  } catch {
+    return undefined;
+  }
+}

@@ -1,3 +1,5 @@
+import { detectVenuePracticalDetail } from '../venue-practical-detail.js';
+
 export function tryEmitBoundaryResponse(input: { content: string }): string | null {
   const text = input.content.trim();
   if (!text) return null;
@@ -28,7 +30,15 @@ export function tryEmitBoundaryResponse(input: { content: string }): string | nu
     ].join('\n');
   }
 
-  if (/\b(?:best|find|near me|nearby|open now|right now)\b[\s\S]{0,80}\b(?:plumber|electrician|restaurant|doctor|dentist|vet|mechanic)\b/i.test(text)) {
+  // A named venue + mutable practical detail is no longer an ungrounded local
+  // recommendation: SearchPipeline can resolve the branch and verify the
+  // requested fact from live first-party evidence. Let those turns reach the
+  // research route instead of issuing this legacy blanket refusal.
+  const venuePracticalDetail = detectVenuePracticalDetail(text);
+  if (
+    venuePracticalDetail === null
+    && /\b(?:best|find|near me|nearby|open now|right now)\b[\s\S]{0,80}\b(?:plumber|electrician|restaurant|doctor|dentist|vet|mechanic)\b/i.test(text)
+  ) {
     return [
       "I don't have live local listings or your exact location, so I should not invent a specific provider.",
       '',

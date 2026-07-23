@@ -50,4 +50,34 @@ describe('TurnProcessSection', () => {
     expect(html).toContain('Investigate');
     expect(html).toContain('Plan');
     expect(html).toContain('Build');
-    expect(
+    expect(html).toContain('Work journal');
+    expect(html).toContain('Observable actions and evidence');
+    expect(html).not.toContain('reasoning-flow');
+    expect(html).not.toContain('Story');
+  });
+
+  it('keeps Council R1 visible when Council R2 is added below it live', () => {
+    const steps: ChatProgressStep[] = [
+      {
+        stage: 'council-vai-round-1',
+        label: 'Council asked Vai to revise',
+        status: 'done',
+      },
+      {
+        stage: 'vai-redraft',
+        label: 'Vai redrafted from council feedback',
+        status: 'done',
+      },
+      {
+        stage: 'council-vai-round-2',
+        label: 'Council re-reviewing the revised draft',
+        status: 'running',
+      },
+    ];
+
+    const html = renderToStaticMarkup(<ProcessTree live steps={steps} />);
+    expect(html).toContain('Council R1');
+    expect(html).toContain('Council R2');
+    expect(html.indexOf('Council R1')).toBeLessThan(html.indexOf('Council R2'));
+  });
+});

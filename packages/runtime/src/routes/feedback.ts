@@ -7,7 +7,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { eq, type VaiDatabase, schema } from '@vai/core';
-import { feedbackBodySchema } from '@vai/api-types/feedback';
+import { feedbackBodySchema } from '@vai/contracts/feedback';
 import { invalidRequestBody } from '../validation/http-validation.js';
 
 export function registerFeedbackRoutes(

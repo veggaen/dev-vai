@@ -22,7 +22,7 @@ import {
   getActiveThemeId,
   withThemeTransition,
 } from '../../lib/odysseus-theme.js';
-import type { ProjectHandoffIntentResponse } from '@vai/api-types/project-responses';
+import type { ProjectHandoffIntentResponse } from '@vai/contracts/project-responses';
 import {
   SettingsShell,
   SettingsSection,
@@ -35,11 +35,12 @@ import {
 import { ThemeManager } from './settings/ThemeManager.js';
 import { ShortcutCustomizer } from './settings/ShortcutCustomizer.js';
 import { VoiceSettingsPanel } from './settings/VoiceSettingsPanel.js';
+import { WorkspaceTrustPanel } from './settings/WorkspaceTrustPanel.js';
 
 const LAYOUT_MODES = [
-  { id: 'compact' as const, label: 'Compact', tagline: 'Instrument', hint: 'Precision cockpit — edge-to-edge, hairlines, crisp motion' },
-  { id: 'open' as const, label: 'Open', tagline: 'Atelier', hint: 'Airy studio — floating glass cards on a living canvas' },
-  { id: 'odyssey' as const, label: 'Odyssey', tagline: 'Voyage', hint: 'Cinematic deck — aurora, starfield, glowing bubbles' },
+  { id: 'compact' as const, label: 'Compact', tagline: 'Instrument', hint: 'Precision cockpit — left rail, dense panels, crisp motion' },
+  { id: 'open' as const, label: 'Open', tagline: 'Atelier', hint: 'Editorial reading room — top command bar, fixed sidebar column, generous space' },
+  { id: 'odyssey' as const, label: 'Odyssey', tagline: 'Stage', hint: 'Immersive stage — bottom dock, full-width content, sidebar floats in on demand' },
 ];
 
 /** Miniature live preview of a layout mode — pure CSS, no screenshots. */
@@ -79,7 +80,7 @@ function LayoutModeMiniature({ mode }: { mode: 'compact' | 'open' | 'odyssey' })
   );
 }
 
-const SETTINGS_TAB_IDS: readonly SettingsTabId[] = ['appearance', 'ai', 'voice', 'integrations', 'engine', 'shortcuts', 'account'];
+const SETTINGS_TAB_IDS: readonly SettingsTabId[] = ['appearance', 'ai', 'voice', 'integrations', 'operations', 'engine', 'shortcuts', 'account'];
 
 function consumeRequestedSettingsTab(): SettingsTabId {
   try {
@@ -494,7 +495,7 @@ export function SettingsPanel() {
 
           <SettingsSection
             title="Layout"
-            description="Compact is VS Code-like. Open adds floating panels. Odyssey is an Odysseus-inspired airy layout with separated bubbles."
+            description="Three rooms, one design language. Compact is the dense cockpit, Open is the calm reading room with a top bar, and Odyssey is a full-width stage where the sidebar slides in only when called."
           >
             <SettingsCard>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -595,6 +596,8 @@ export function SettingsPanel() {
       )}
 
       {activeTab === 'voice' && <VoiceSettingsPanel />}
+
+      {activeTab === 'operations' && <WorkspaceTrustPanel />}
 
       {activeTab === 'integrations' && (
         <>

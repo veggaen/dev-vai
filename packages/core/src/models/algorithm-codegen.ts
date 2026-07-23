@@ -56,6 +56,35 @@ export function tryAlgorithmCodeGen(input: string, algoTemplate: AlgoTemplateFn)
     // ─── Algorithm detection & template selection ───
     const lower = input.toLowerCase();
 
+    // Explicit typed array-grouping contracts. Parse the user's function and
+    // parameter identifiers instead of substituting a memorized chunk snippet.
+    const typedGrouping = input.match(
+      /(?:function\s+)?([A-Za-z_$][\w$]*)\s*<\s*T\s*>\s*\(\s*([A-Za-z_$][\w$]*)\s*:\s*readonly\s+T\[\]\s*,\s*([A-Za-z_$][\w$]*)\s*:\s*number\s*\)\s*:\s*T\[\]\[\]/,
+    );
+    if (
+      typedGrouping
+      && /\b(?:chunk|chunks|split|group|groups|batch|batches|preserv(?:e|es)\s+(?:input\s+)?order|keeps?\s+(?:input\s+)?order|final\s+short)\b/i.test(input)
+    ) {
+      const [, functionName, itemsName, sizeName] = typedGrouping;
+      return [
+        '```ts',
+        `function ${functionName}<T>(${itemsName}: readonly T[], ${sizeName}: number): T[][] {`,
+        `  if (!Number.isInteger(${sizeName}) || ${sizeName} <= 0) {`,
+        `    throw new RangeError('${sizeName} must be a positive integer');`,
+        '  }',
+        '  const result: T[][] = [];',
+        `  for (let index = 0; index < ${itemsName}.length; index += ${sizeName}) {`,
+        `    result.push(${itemsName}.slice(index, index + ${sizeName}));`,
+        '  }',
+        '  return result;',
+        '}',
+        '',
+        `${functionName}([], 2); // []`,
+        `${functionName}([1, 2, 3], 2); // [[1, 2], [3]]`,
+        '```',
+      ].join('\n');
+    }
+
     // BST (check before binary search to avoid false match)
     if (/(?:binary\s+search\s+tree|bst)\s+(?:insert|class|implementation)/i.test(lower)
       || /(?:implement|write|create|build)\s+(?:me\s+)?(?:a\s+|an?\s+)?(?:binary\s+search\s+tree|bst)/i.test(lower)) return algoTemplate('bst_insert', lang);

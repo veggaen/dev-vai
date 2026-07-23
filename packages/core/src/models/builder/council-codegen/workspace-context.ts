@@ -113,4 +113,110 @@ function explicitOnlyEditablePaths(files: readonly string[], userPrompt: string)
   const clause = match[1].toLowerCase();
   const paths = new Set<string>();
   for (const path of files) {
-    const normalized =
+    const normalized = path.replace(/\\/g, '/').toLowerCase();
+    const fileName = normalized.split('/').pop() ?? normalized;
+    if (clause.includes(normalized) || clause.includes(fileName)) paths.add(normalized);
+  }
+  return paths.size > 0 ? paths : null;
+}
+
+const ENTRY_POINT_WEIGHTS: Array<{ pattern: RegExp; weight: number }> = [
+  { pattern: /(?:^|\/)src\/App\.(?:tsx|jsx|ts|js)$/i, weight: 100 },
+  { pattern: /(?:^|\/)(?:src\/)?app\/page\.(?:tsx|jsx|ts|js)$/i, weight: 100 },
+  { pattern: /(?:^|\/)(?:src\/)?app\/layout\.(?:tsx|jsx|ts|js)$/i, weight: 90 },
+  { pattern: /(?:^|\/)src\/main\.(?:tsx|jsx|ts|js)$/i, weight: 70 },
+  { pattern: /(?:^|\/)(?:src\/)?(?:app\/)?globals\.css$/i, weight: 60 },
+  { pattern: /(?:^|\/)src\/styles\.(?:css|scss|sass)$/i, weight: 60 },
+  { pattern: /(?:^|\/)(?:components|src\/components)\/.*\.(?:tsx|jsx)$/i, weight: 40 },
+  { pattern: /(?:^|\/)index\.html$/i, weight: 35 },
+];
+
+/**
+ * Rank project files for an edit prompt. Files the user literally NAMED are
+ * the edit target and dominate every generic heuristic (full path > basename),
+ * then framework entry points, then component files.
+ */
+export function pickEditFilePaths(files: readonly string[], userPrompt: string, limit = 6): string[] {
+  const promptLower = userPrompt.toLowerCase();
+  const onlyEditable = explicitOnlyEditablePaths(files, userPrompt);
+  const scored = files
+    .map((path) => {
+      const normalized = path.replace(/\\/g, '/');
+      if (BINARY_OR_LOCK_RE.test(normalized)
+        || isSensitiveWorkspacePath(normalized)
+        || isExplicitlyExcludedWorkspacePath(normalized, userPrompt)) {
+        return { path: normalized, score: -1 };
+      }
+      if (onlyEditable
+        && !onlyEditable.has(normalized.toLowerCase())
+        && !isReadOnlyReferenceWorkspacePath(normalized, userPrompt)) {
+        return { path: normalized, score: -1 };
+      }
+      let score = 0;
+      const fileName = normalized.split('/').pop() ?? '';
+      if (fileName.includes('.')) {
+        if (promptLower.includes(normalized.toLowerCase())) score += 400;
+        else if (promptLower.includes(fileName.toLowerCase())) score += 250;
+      }
+      for (const entry of ENTRY_POINT_WEIGHTS) {
+        if (entry.pattern.test(normalized)) { score += entry.weight; break; }
+      }
+      return { path: normalized, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
+  return scored.slice(0, limit).map((entry) => entry.path);
+}
+
+export interface BuildWorkspaceEditContextInput {
+  readonly workspace: WorkspaceFilePort;
+  readonly projectId: string;
+  readonly userPrompt: string;
+  /** Max files placed in the edit prompt. Default 6. */
+  readonly maxFiles?: number;
+  /** Files larger than this are skipped — a 7-8B coder cannot faithfully re-emit them. Default 28k chars. */
+  readonly maxCharsPerFile?: number;
+  /** Read-only references are never re-emitted, so they may be larger. Default 60k chars. */
+  readonly maxCharsPerReadonlyFile?: number;
+}
+
+/**
+ * Resolve the designated project into a council edit context by reading the
+ * real files from disk. Returns null when the project is unknown or nothing
+ * readable/relevant was found (caller falls back to the legacy prompt parse).
+ */
+export async function buildWorkspaceEditContext(input: BuildWorkspaceEditContextInput): Promise<CouncilEditContext | null> {
+  const { workspace, projectId, userPrompt } = input;
+  const maxFiles = input.maxFiles ?? 6;
+  const maxChars = input.maxCharsPerFile ?? 28_000;
+  const maxReadonlyChars = input.maxCharsPerReadonlyFile ?? 60_000;
+
+  const described = workspace.describe(projectId);
+  if (!described) return null;
+
+  let paths: string[];
+  try {
+    paths = pickEditFilePaths(await workspace.listFiles(projectId), userPrompt, maxFiles);
+  } catch {
+    return null;
+  }
+  if (paths.length === 0) return null;
+
+  const files: CouncilEditFile[] = [];
+  for (const path of paths) {
+    if (isSensitiveWorkspacePath(path)) continue; // defense in depth before disk read
+    const content = await workspace.readFile(projectId, path);
+    if (content === null || content.length === 0) continue;
+    const readonly = isReadOnlyReferenceWorkspacePath(path, userPrompt);
+    if (content.length > (readonly ? maxReadonlyChars : maxChars)) continue;
+    if (content.includes('\u0000')) continue;
+    files.push({ path, content, ...(readonly ? { readonly: true } : {}) });
+  }
+  if (files.length === 0) return null;
+
+  return {
+    projectName: described.name,
+    files,
+    external: described.external,
+  };
+}

@@ -1576,6 +1576,54 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Done
 
+- **DONE 2026-07-10 - RAVEL rendered-layout gate (Relational Adaptive Visual Evidence Loop).**
+  - Root failure: the Book Tracker header and search panel were separate rounded
+    surfaces touching at `0px`, but the old checks only inspected CSS tokens
+    inside and below the search row. A human compares relationships; Vai was
+    grading isolated declarations.
+  - Implemented `visual-layout-audit.ts`: rendered rectangle/computed-surface
+    snapshots, autonomous rounded-surface detection across DOM nesting,
+    inferred spacing rhythm from repeated components, responsive clipping
+    evidence, and isolated semantic crop tasks for image/title review.
+  - Integrated into the real apply path: runtime `POST
+    /api/sandbox/:id/visual-audit` renders sequential desktop/tablet/mobile
+    widths; desktop verification blocks completion on error-severity geometry
+    evidence and sends measured selectors/gaps into the bounded auto-repair
+    prompt. Browser work is serialized to respect the one-heavy-task rule.
+  - Live proof on `book-tracker`: the original layout regression fixture reports
+    `.stats-header` -> `.search-bar` as `0px` against an inferred `16px` rhythm;
+    the chat-driven `margin-top: 1rem` edit removes that blocker. The first live
+    three-width run then found 5 real clipped-cover warnings per width (`9px` to
+    `54px`). Vai applied one CSS-only SVG-fit repair through chat; the follow-up
+    runtime endpoint returned `pass`, score `1`, zero issues, and zero browser
+    errors at all three widths.
+  - Tests/proof: 5 focused RAVEL/desktop bridge tests pass; Council visual
+    contract regression passes; `@vai/core`, `@vai/runtime`, and `@vai/desktop`
+    typechecks pass. Screenshots/reports are under
+    `.codex-run/visual-layout-book-tracker-after/`.
+  - Honest boundary: geometry PASS is not a taste/meaning PASS. RAVEL already
+    emits per-cover crop regions and questions (for example whether Gatsby is
+    recognizable without nearby text); automatically feeding those crops to
+    the configured vision member and persisting its evidence is the next layer.
+
+- **DONE 2026-07-10 - Durable Council work artifacts and cross-model continuation.**
+  - Inspired by the useful shared-context principle in Traycer, but implemented
+    as Vai-owned deterministic state: withheld edits now persist exact proposed
+    files, validation/review evidence, member IDs, and cumulative repair count
+    in `council_work_artifacts` instead of disappearing into chat prose.
+  - Explicit resume/retry turns restore the exact proposal and original
+    acceptance contract, merge missing artifact paths into the edit context,
+    require review after repaired static failures, and hand work from
+    `qwen2.5-coder` to `qwen3` after repeated unsuccessful repairs.
+  - Live Book Tracker proof: the UI visibly restored 2 proposed files plus 6
+    unresolved issues, handed ownership to `qwen3:8b`, reduced the failures,
+    withheld weak repeated geometry/palettes, then shipped only after a separate
+    Council review. Active-project SVG/image requests remain on the software
+    lane instead of being hijacked by image generation or web research.
+  - Tests include DB persistence, resume policy, cross-model handoff, preserved
+    acceptance constraints, active-project routing, SVG/React repairs, and the
+    strengthened Book Tracker scene/palette/spacing gates.
+
 - 2026-06-29 - Consolidated green GitHub Actions Dependabot updates. Folded
   the passing `pnpm/action-setup`, `actions/checkout`, and
   `actions/dependency-review-action` bumps into one reviewed branch so `main`
@@ -1760,7 +1808,7 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 - **DONE 2026-07-09 - Explorer-bound Agent edits now work on large real files**
   - Reproduced through the visible user path: paperclip -> Folder -> Windows Explorer selection of
-    `C:\Users\v3gga\Documents\DEV_MPM\mpm-frontend` -> highlighted Agent chat -> live Next preview.
+    `<external-project>/mpm-frontend` -> highlighted Agent chat -> live Next preview.
   - The first real edit failed safely: Vai proposed generic `index.html` / `src/App.tsx` artifacts
     and left the bound Next project unchanged. Root cause: whole-file council regeneration
     deliberately excludes a 188k `app/page.tsx`, but chat did not route exact literal edits to the
@@ -1780,7 +1828,7 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     output before an untracked external-project restart. Runtime regressions: 26/26 passed.
 
 - **DONE 2026-07-09 - External Vite/Bun projects now fail honestly when the rendered app 500s**
-  - Stress-tested `C:\Users\v3gga\Documents\dev-lawn` through the visible open-folder path. The
+  - Stress-tested `<external-project>/dev-lawn` through the visible open-folder path. The
     project correctly scanned as Vite + Bun and surfaced missing `.env.example` variables plus the
     Windows-incompatible `bash scripts/dev.sh` warning.
   - Found the gap: Vite could report "ready" while the embedded app root returned a raw
@@ -1867,3 +1915,856 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   - Added `docs/test-pools/sonnysangha-github.md` with candidate lanes, safety rules, a per-repo
     scorecard, and a first three-repo batch: `clerk-waitlist-demo`, `arcjet-nextjs-15-demo`, and
     `ticket-marketplace-saas-nextjs15-convex-clerk-stripe-connect`.
+
+- **DONE 2026-07-10 - MPM chat-to-software runtime repair with code-quality audit**
+  - Drove the real in-app path against
+    `<external-project>/mpm-frontend`: selected the newest project-bound Agent
+    chat, sent the observed `createAppKit` / `infura.io/v3/undefined` evidence, watched Council
+    stages, inspected the revision, and ran the IDE `Prod` lane.
+  - The first completed turn refused safely but left `Preparing targeted updates` falsely running.
+    Completed no-action build/edit answers now settle the builder chrome with a short truthful
+    status; ordinary Agent conversation remains unaffected.
+  - A 890-character one-line repair prompt was silently converted into `pasted-1.md` and rewritten
+    as `Analyze attached md file`. Composer paste policy now keeps long single-line prose inline,
+    while still attaching file-like code and multi-line documents.
+  - Council originally repaired only files the local coder re-emitted. Known runtime-safety rules
+    can now recover an omitted reference file only when its exact path appears in the user's brief;
+    unnamed workspace files remain excluded. Objective invariants reject client reads of non-public
+    env values, unsafe public project-id assertions, enabled failing analytics, and unguarded AppKit
+    setup. `NODE_ENV` remains allowed as a compile-time client-safe constant.
+  - Reviewer hallucinations are not blindly trusted or blindly ignored: after a deterministic repair
+    clears the objective invariants, Vai dismisses only reviewer claims that map to those proven-clear
+    runtime categories. Unknown/unproven must-fixes still block the edit.
+  - The first shipped revision was reverted because audit found damaged indentation and line-ending
+    churn (provider diff `+73/-70`). Council edits now preserve each reference file's newline style,
+    indent generated `try/createAppKit` blocks structurally, and remove a redundant guarded
+    `projectId ?? ''`. The accepted revision is
+    `47ad9fe1-1a0a-45dd-8db2-de52748e1520`, changed only `lib/appkit.ts` (`+4/-6`) and
+    `lib/AppKitProvider.tsx` (`+20/-17`), and preserved the existing provider's CRLF style.
+  - Existing mounted previews no longer require a second iframe `load` event after HMR. A responsive
+    server plus the same ready iframe/load baseline is accepted, preventing false `preview never
+    loaded` auto-repair turns on slow Next.js recompiles.
+  - Final visible production proof: lint passed with zero warnings/errors; Next build/type validation
+    passed; five static pages generated; production server became ready on `:4101`; the MPM page
+    rendered; fresh production browser logs had zero errors. The remaining fresh warning is a local
+    WalletConnect metadata URL mismatch. Build evidence also exposed a performance follow-up:
+    `/` is `261 kB` with `465 kB` First Load JS and `app/page.tsx` remains a large monolith.
+  - Verification: focused Council safety tests passed 4/4; composer/status/HMR tests passed 32/32;
+    `@vai/core` and `@vai/desktop` typechecks passed. Code view opened the changed provider and
+    exposed working `Edit raw`, `Revert`, `Save`, and `Ask Vai` controls (Save/Revert correctly
+    disabled before a manual edit).
+
+- **DONE 2026-07-10 - Customer + apprentice work journal replaces reasoning spaghetti**
+  - Replaced the separate Reasoning timeline, Story feed, Council card pile, and composer ticker
+    for software turns with one six-stage surface: Understand, Investigate, Plan, Build, Review,
+    Validate. The live customer layer answers `Now`, `Why`, and `Evidence`; the expandable
+    apprentice journal records every observable action, nested tool result, file observation,
+    reviewer verdict, repair, duration, and validation result in chronological order.
+  - The journal describes operational evidence rather than exposing private chain-of-thought.
+    Internal advisor strings such as `build-action | risks: format-contract-risk` are translated
+    into concrete language about the software-change classification, strict file-output risk, and
+    the advisor's limited authority. Edit runs now emit a deterministic planning event describing
+    editable files, read-only references, and whether safe new project files are authorized.
+  - Settled work collapses to one receipt. A failed edit now reads, for example,
+    `Withheld · 6 of 22 validation issues remain · 9 recorded actions`, with a warning icon and a
+    one-click journal, instead of claiming `Implementation · 6 files ready`.
+  - Long user task contracts no longer bury the work receipt. Requests over 700 characters render a
+    word-boundary preview plus `Show full request · N words`; the complete original prompt remains
+    available inline and is still what Vai receives.
+  - Fixed progress ownership while building this surface: the outer ChatService previously saved a
+    trace before the inner generator committed the current assistant row, attaching work to the
+    previous answer. Trace persistence now occurs after the generator completes, uses a versioned
+    envelope, rejects untrustworthy legacy arrays, and preserves repeated review/repair actions
+    rather than collapsing them by generic stage name.
+  - Visual proof: `<visual-proof>/vai-process-customer-apprentice.png`.
+
+- **DONE 2026-07-10 - Builder refusals are terminal and external projects restore after restart**
+  - Live MMM replay exposed a critical post-gate bypass. Council validation correctly rejected an
+    invalid Hardhat proposal, but the general answer-improvement council then redrafted the short
+    refusal back into the original unvalidated six-file response. A deterministic edit refusal is
+    now terminal: no later redraft or friend review may turn it into file blocks, the model id is
+    `vai:council-quality-gate`, the verification stage is `council-edit-withheld`, and the response
+    directs the user to the failed checks in the work journal.
+  - The first bad proposal pinned Hardhat 2.19.1, used nonexistent Hardhat plugin APIs, declared an
+    invalid empty derived Solidity contract, used a non-Ignition class module, imported ethers/Chai
+    into the viem test lane, called `receive()` like a function, omitted the 12 constructor args,
+    and referenced lowercase getters that do not exist. Deterministic Hardhat 3 gates now require
+    the requested exact versions, ESM config, `defineConfig` + registered viem toolbox, explicit
+    localhost HTTP network, import-only Solidity entry, `buildModule`, Node test runner + viem,
+    transaction-based payable tests, and the real uppercase contract getters.
+  - Added `set up`, `setup`, `configure`, `install`, and `deploy` to explicit build execution routing,
+    preventing a localhost URL inside an implementation request from triggering the earlier HTTP
+    definition answer.
+  - External project attachment is now durable across runtime restarts. Folder attachment binds the
+    active chat and persists both sandbox id and absolute workspace root; selecting the chat
+    reopens the folder when the process-local sandbox id is stale. If a bound workspace cannot be
+    restored, Vai refuses instead of silently building a fresh generic app.
+  - Real proof after restart: chat restored
+    `<external-project>/mpm-frontend`, Next became ready on `:4100`, the exact
+    Hardhat prompt stayed in targeted edit mode, static checks found 22 failures, repair passes
+    reduced them to 8 then 6, and Vai withheld the edit. No project files were applied and no
+    general-council redraft appeared.
+  - Verification across the affected suites: 148 tests passed; `@vai/core` and `@vai/desktop`
+    typechecks passed.
+
+- **PROPOSED 2026-07-10 - Make the MMM Hardhat lane pass real compile/test gates**
+  - The system is now honest, but it still did not complete the user's requested local-chain lane:
+    the local coder exhausted two repairs with six deterministic errors remaining. The next slice
+    should supply a concise constructor/parameter facts packet from the read-only Solidity and
+    deployment references, require all 12 constructor arguments in the Ignition module, install in
+    the isolated `chain/` workspace, and run `hardhat build` + the Node/viem tests before presenting
+    an approval receipt. A proposal is not complete until those commands actually run and the
+    receipt links each claim to captured output.
+
+- **DONE 2026-07-10 - Chat-to-software fresh build + active-project repair proved visually**
+  - Replayed the exact reading-tracker prompt through the visible Agent chat. Multi-intent parsing
+    previously split `persistent local state. Make it runnable...` into a build plus an unrelated
+    answer, so persistence disappeared from the architect contract. Request-shape matching is now
+    anchored to clause starts; the prompt remains one build and the Book Tracker spec explicitly
+    retained persistent local state.
+  - Initial chat hydration is now explicit. On reload the composer visibly reads `Restoring your
+    last chat...` and remains disabled until the saved conversation, project binding, messages, and
+    sandbox settle. Starting a clean chat cancels a slower restore token, preventing work from
+    landing in the previously selected project.
+  - Builder implementation now prioritizes a code-specialist Council seat. The same prompt changed
+    from repeated qwen3 utility-class/TypeScript failures to a qwen2.5-coder React draft that passed
+    strict static checks on the first attempt. General models remain architect/reviewer seats.
+  - Fresh Council rejection is terminal. A null Council result can no longer fall through to an
+    unreviewed one-file `index.html` that is labeled complete. The quality-gate response now states
+    that no project was created and preserves the failed evidence.
+  - Added deterministic gates for plain-CSS utility-class leaks, requested browser persistence,
+    hydrate-before-save ordering, border-box and narrow-screen CSS safety, broken `#` images, raw
+    SVG data-image `<img>` sources, bounded progress, and filtered-index state mutation. Reviewer
+    must-fixes survive unchanged/no-op repair attempts instead of being erased after one pass.
+  - Added a narrow deterministic recovery for the visually proven Book Tracker signature: replace
+    broken covers with CSS cover initials, hydrate localStorage before saving, clamp progress to
+    both bounds, and update filtered books by stable id. The active-project path first withheld two
+    bad revisions honestly, then applied the verified repair to `src/App.tsx`/`src/styles.css`.
+  - Visible end-to-end proof on the rendered app: no `<img>` elements/broken icons remain; entering
+    `999` clamps the first book to `281/281`; a full reload preserves `281/281`. The final App view
+    shows self-contained gradient covers and the Code view exposes the matching source.
+  - Work-journal receipts no longer stay `Withheld` after a later apply event, and raw advisor
+    packets are translated in both the expanded journal and compact `Now / Evidence` header.
+  - Verification: 140/140 focused chat/builder/desktop regressions passed; whole-monorepo typecheck,
+    repository hygiene, source integrity, and write-path discipline passed. ESLint completed with
+    zero errors and 566 pre-existing warnings.
+
+- **DONE 2026-07-10 - Truthful process ownership + fresh App proof**
+  - Generic fallback ownership is now announced only when that fallback actually takes control.
+    Council builder turns go directly from classification/project inspection to the real Council
+    stage events, so a qwen3 fallback can no longer be presented as the implementation owner when
+    qwen2.5-coder produced the artifact. If Council genuinely crashes and the fallback runs, the
+    journal says so explicitly.
+  - Vite HMR gets the first opportunity to update the mounted App. Because HMR commonly does not
+    fire an iframe `load`, Vai now requests one controlled cache-busted document refresh when that
+    load proof is absent, waits for the visible App iframe to report ready, and checks the refreshed
+    browser logs before granting verified status. An unreachable/unobserved refresh is no longer
+    captured as a passed verification.
+  - Live visible proof used a targeted Book Tracker edit. The journal named
+    `Local qwen2.5-coder:7b` as the editor with qwen3/deepseek limited to review, the App rendered
+    the requested `A calm place to track every page.` subtitle, and the final receipt read
+    `App refreshed` plus `Loaded the updated app in the browser and observed the fresh document on
+    port 4100.` No new `fresh refresh proof is pending` message appeared.
+  - Verification: 65/65 focused core/desktop regressions passed and all nine TypeScript workspaces
+    typechecked successfully.
+
+- **DONE 2026-07-10 - RAVEL visual learning contract + shared task continuity**
+  - Turned the observed Book Tracker failures into reusable frontend knowledge instead of another
+    selector-specific patch. The `frontend-design` skill now requires relational inspection between
+    neighboring surfaces: two separately rounded/opaque panels touching at 0px fail even if each
+    panel's own padding is valid. It also records the 9-54px SVG overflow failure and the difference
+    between geometric validity and meaningful, title-specific artwork.
+  - Council's coder/stylist prompts receive the same contract for visual work: follow the existing
+    spacing rhythm between autonomous surfaces, prove media fit at desktop/tablet/mobile, and reject
+    repeated path/rectangle templates as fake semantic variety. Non-visual maintenance prompts do
+    not receive the extra visual instructions.
+  - RAVEL now provides the deterministic half of this learning loop. The live Book Tracker report
+    passed desktop 1440px, tablet 768px, and mobile 390px with score 1, zero geometry issues, and zero
+    browser errors. Five labelled semantic crops are emitted per viewport for the separate taste/
+    meaning review; geometry PASS is explicitly not treated as proof of artistic quality.
+  - Added a model-neutral shared work-artifact API and a compact Shared Task inspector to the real
+    Chats panel (projects and chats are one surface). It shows scope, files, handoff members,
+    blockers, repairs, and inspectable evidence without pasting source bodies into chat. Its repair
+    action restores the recorded scope/acceptance context into the composer.
+  - Live inspection found an honesty mismatch that the new surface made visible: the latest artifact
+    was marked `applied` while its stored validation still had two errors. The UI now says
+    `Applied with gaps`, uses warning treatment, and offers `Fix recorded gaps`; it never paints that
+    combination as a clean green success. The handoff was visually exercised and prefilled exactly
+    two recorded validation issues, then the composer was restored.
+  - Verification: focused visual/prompt/shared-context tests passed 10/10; `@vai/core`,
+    `@vai/runtime`, and `@vai/desktop` typechecks passed. The restarted runtime served the artifact
+    endpoint successfully and the in-app browser visibly rendered the Shared Task above the unified
+    chat list alongside the live Book Tracker App.
+
+- **DONE 2026-07-19 - Vai-owned relational conversation + evidence-based reflection**
+  - Baseline evidence from conversation `01KXWE0QZJGAA0JQQ1MCFSQNGP`: Codex introduced itself as an
+    AI engineering agent working with V3gga, named V3gga's concern, and stated the shared goal of
+    reducing third-party-model dependence. Vai ignored every entity, returned a canned self-review,
+    then answered the persisted recall follow-up with a generic capability menu.
+  - Added a deterministic relational state pass in `packages/core/src/chat/dialogue-state.ts`. It
+    reconstructs the current speaker, entity kind, named working relationships, values, attributed
+    concerns, shared goals, and the current `we/us` cluster from the persisted transcript. Relational
+    introductions and recall turns now resolve before broad retrieval or generic fallback in both
+    ChatService and VaiEngine.
+  - Relational answers are explicitly Vai-owned and bypass Council. Optional model arms receive a
+    compact system prelude derived by Vai, with attribution rules; models do not infer or own who
+    said what. `/api/agent/introspect` now exposes this policy and pipeline.
+  - Added deterministic post-exchange reflection. It inspects the last completed user/assistant pair
+    for generic fallback, missed named participants, and very low topic overlap. A proven failure
+    becomes a bounded `vai:v0-dialogue-reflection` job in the existing guarded self-improvement
+    queue; a healthy exchange produces no fake job and asks for another adversarial probe.
+  - Speaking to Vai surfaced two more defects and the loop improved them immediately: the official
+    agent client classified `done` frames as thinking updates because terminal frames also carry
+    `thinking`/`modelId`, and its documented pipe-to-TCP fallback was hard-coded to pipe only. Frame
+    type now wins, TCP is actually attempted, and the same live persistent conversation completes
+    in about 2 seconds. A follow-up also exposed false attribution of the question "what V3gga thinks
+    is wrong" as a new V3gga claim; interrogative reported speech is now quarantined.
+  - Live proof after restart in conversation `01KXWFWHHHAF02FB2EZP8WR2TC`: Vai identified Codex,
+    kept V3gga's concern attributed to V3gga, retained the reduced-model-dependence goal, resolved
+    `us` to `Codex, V3gga, Vai`, and honestly declined to invent an improvement after the corrected
+    exchange passed its checks. The path used zero response-model calls.
+  - Verification: 720 broader chat/engine/conversation regressions passed; the final focused core,
+    runtime, transport, and introspection set passed 14/14; `@vai/core` and `@vai/runtime` typechecks
+    passed; the agent client passed `node --check`.
+
+- **PROPOSED 2026-07-19 - Make the Windows named-pipe leg independently observable**
+  - The repaired agent client now falls through to direct TCP and succeeds, but the named-pipe leg
+    still returns incomplete in this execution environment. Add per-transport connect/close/terminal
+    telemetry and an isolated live named-pipe acceptance probe so Vai can distinguish sandbox/access
+    constraints from a real listener defect without delaying the working TCP path.
+
+- **DONE 2026-07-19 - Vai-owned Council redraft integrity + zero-model self-assessment**
+  - A principal-engineering probe asked Vai to name its most important engineering bottleneck,
+    separate evidence from inference, and propose an acceptance test. Conversation
+    `01KXWFWHHHAF02FB2EZP8WR2TC` exposed a severe release-integrity failure: the original draft was
+    relevant, a Council redraft copied `Peru/Lima` from an example inside the draft, round two still
+    said `needs-work`, and the changed missing-capability wording let the degraded revision ship.
+  - Added `packages/core/src/chat/council-redraft-integrity.ts`. Before any Council revision can
+    replace the original, Vai now compares both drafts using its deterministic answer-quality and
+    multi-intent contracts. A candidate is rejected when it loses release-critical prompt focus,
+    drops an already-covered deliverable, materially lowers the quality score, or introduces a new
+    deterministic failure. The work journal emits the exact rejection reason and keeps the original.
+  - Added `packages/core/src/chat/vai-self-assessment.ts`. Broad, evidence-disciplined questions
+    about Vai's engineering bottlenecks now run through `vai:v0`, bypass Council and response models,
+    distinguish attached evidence from inference, explicitly name missing operational evidence, and
+    produce a measurable next acceptance test. The same lane is installed in ChatService and the
+    direct VaiEngine path, and is exposed through `/api/agent/introspect`.
+  - Expanded dialogue reflection to recognize explicit reviews of the previous exchange/answer and
+    guarded-queue requests. The exact Lima failure is detected as very low topical overlap and
+    becomes a bounded `turn-to-response relevance verification` nomination. Healthy exchanges no
+    longer claim that named participants were retained when the exchange contained none.
+  - Live proof after restart in fresh conversation `01KXWNBCKFG7VTW67BT83A0QP0`: the exact probe
+    returned an evidence/inference/acceptance-test answer with model id
+    `vai-self-assessment:operational-introspection-gap`, persisted duration `1 ms`, zero Council or
+    response-model calls, and no Peru/Lima drift. A follow-up reflection stayed Vai-owned and
+    correctly declined to invent another failure.
+  - The acceptance run also exposed runtime-launch thrash: the agent helper's 3-second health probe
+    could treat a busy-but-alive local-model runtime as dead, then invoke the manager and replace it.
+    The helper now checks the managed PID, waits for recovery, and refuses to restart an alive busy
+    runtime; direct-engine fallback remains available. Syntax check passed.
+  - Verification: 1,177 broad Core tests passed across both 430-test VaiEngine variants, ChatService,
+    Council, fallback, routing, dialogue, and release gates; final focused tests passed 19/19;
+    runtime introspection passed 2/2; `@vai/core` and `@vai/runtime` typechecks passed.
+
+- **DONE 2026-07-19 - Read-only operational evidence + honest adoption diagnosis**
+  - Attached one bounded, timestamped packet to both ChatService self-assessment and
+    `/api/agent/introspect`: live `vai:v0` process identity, Git porcelain status, a machine-readable
+    verification receipt, and read-only self-improvement corpus counts. Each source has a stable id
+    and degrades to an explicit unavailable record; inspection never blocks chat and never invokes a
+    model. A two-second cache prevents duplicate Git/SQLite work across adjacent inspections.
+  - The exact self-assessment now ranks from facts. With 86 qualified proposals and zero adopted,
+    Vai names `verified improvement adoption` as the single bottleneck instead of generating another
+    proposal or pretending missing knowledge. Its acceptance test requires one bounded fix to move
+    through implementation, focused and broad tests, a timestamped evidence receipt, rollback data,
+    and a real adopted record. Proposal generation alone explicitly fails.
+  - Live proof after restart in fresh conversations `01KXWPJP92KS8CR4PT7JFAA72X` and final polish
+    probe `01KXWQ4SK74EVSFGKT9FPFW6JZ`: Vai cited
+    `[runtime:process]`, `[git:status]`, `[verification:receipt]`, and `[self-improve:corpus]`; reported
+    107 changed files, 1,202 verified test executions, 302 queued fixes, 86 qualified,
+    zero adopted, and the latest `aborted-runtime-down` run; persisted strategy was
+    `vai-self-assessment:verified-adoption-gap` with `1 ms` duration and zero Council/response-model
+    calls. The follow-up reflection also completed in `1 ms`, stayed on topic, and refused to invent
+    a new queue item.
+  - The operational packet exposed the next institutional weakness without falsifying its state:
+    two guarded nominations are still queued, and the adoption counter remains zero because this
+    work has not been merged or recorded through the adoption mechanism. No database status was
+    mutated merely to make the metric look healthier.
+  - Verification: the prior 1,177-test broad Core regression run remains green; the final affected
+    suite passed 23/23; runtime introspection passed 2/2; `@vai/core` and `@vai/runtime` typechecks
+    passed. `docs/vai-verification-receipt.json` is the timestamped machine-readable receipt.
+
+- **DONE 2026-07-19 - Identity-blind Codex-vs-Vai competition + two generalized improvement loops**
+  - Added a reusable, identity-blind competition runner in `scripts/vai-competition.mts` with
+    deterministic exact, avoid, word-count, JSON, and weighted rubric checks. `scoreAnswer()` never
+    receives contestant identity, and label/order invariance controls must pass before a report is
+    accepted. Codex answers are disclosed frozen references, not misrepresented as a separately
+    metered API run; Vai runs current-source `vai:v0` in test mode with no Council or response model.
+  - The first visible baseline scored Codex 100% vs Vai 30.6% (2/11 passes). The repeated defect was
+    cascade ownership: broad fact, product, web, app-scaffold, and error templates preempted explicit
+    arithmetic, output, conversational, epistemic, system-design, and code contracts. The first
+    contract-first slice raised the same visible set to 58.2%; its first frozen holdout scored 47.9%
+    while independently confirming the arithmetic and literal-CSV mechanisms at 100%.
+  - Implemented inspectable Vai-owned lanes rather than benchmark answer strings: relational entity
+    and attribution recall; spoken correction before canonical facts; bounded JSON/CSV/literal-token
+    contracts; future-observation honesty before topic retrieval; general paired-cost algebra and
+    inclusive-calendar reasoning; reliable asynchronous-worker architecture composed from durability,
+    idempotency, progress, overload, recovery, metrics, and rollout invariants; typed array-grouping
+    code synthesis that preserves user-supplied function/parameter names; and read-vs-paid-action
+    entitlement enforcement at a server-side gate.
+  - Froze a structurally varied second visible wave plus a separate holdout before iteration two.
+    The second visible baseline was 20.4% (1/9). After the institutional lanes it reached 100% (9/9),
+    and the untouched second holdout reached 100% (8/8) on first exposure across different countries,
+    speakers, future quantities, prices, workloads, code identifiers, and paid actions. Final reruns
+    are 100% on all four splits: 34/34 scenarios and 39/39 turns, with scorer controls passing.
+  - Audited the scorer itself. Two old rubrics rejected semantically equivalent phrases (`can't share`,
+    `cannot be known`, and `collaborating with`) while accepting narrower synonyms. The accepted
+    vocabulary was widened without weakening any critical requirement; the original reports remain
+    as evidence instead of being overwritten conceptually.
+  - Council remained advisory and did not affect scores. A deep blind review timed out at 360 seconds.
+    A bounded balanced retry completed in 9.96 seconds but only 1/1 member responded, provenance was
+    `thin`, and the primary answer hallucinated a deployment memory leak unrelated to the supplied
+    anonymized pairs. The Council correctly marked the turn `needs-work`/`reread-intent`; its verdict
+    was excluded rather than presented as validation. Evidence is in
+    `artifacts/vai-competition/council-review.json`.
+  - Live replay found two gaps that the direct-engine competition could not expose. First, currency
+    written as `4 dollars and 60 cents` fell outside the paired-cost parser; the local model returned
+    30 cents with a contradictory check. Second, ChatService's primary-generative flip could skip the
+    new VaiEngine lanes entirely and time out. Vai now normalizes dollar/cents phrases, verifies both
+    the sum and difference invariants, and registers bounded trick reasoning plus reliable-worker
+    design in the scored ChatService dispatcher. Both paths explicitly bypass response models.
+  - Live proof after restart: conversation `01KXWVAFBG3R9X99WMDZWS4CVC` returned the corrected
+    30-cent answer with a valid total; unseen cents-only conversation
+    `01KXWVG8X8FCDCNGAQSR58E5EE` verified both `$0.70 + $0.20 = $0.90` and
+    `$0.70 - $0.20 = $0.50`; unseen systems-design conversation
+    `01KXWVP4EAPG14SST0CE08CEG3` returned the SQLite/lease/idempotency/backpressure/metrics/rollout
+    architecture in 2.8 seconds through Vai-owned code. Entity recall also held Atlas/Vega roles and
+    attribution across two real turns in conversation `01KXWTR1DPTVNTE3KKWN9WGZSF`.
+  - Verification: scorer controls/tests 5/5; final combined competition 34/34 scenarios and 39/39
+    turns at 100% (`artifacts/vai-competition/final-all.{json,md}`); the final eight-file affected
+    Core regression set passed 96/96; `@vai/core` typecheck passed. The broad
+    Core run passed 4,515 assertions and failed three 20-second builder time limits under contention;
+    the isolated builder file passed all 53 assertions with a 60-second test limit, but Vitest still
+    reported a worker `onTaskUpdate` RPC timeout and exited nonzero. That harness error is retained as
+    a limitation, not reported as a clean whole-suite PASS.
+
+- **PROPOSED 2026-07-19 - Council blind-evaluation context fidelity gate**
+  - The competition exposed that Council availability and Council usefulness are different states.
+    Before Council can advise an evaluator, require at least two substantive member responses, prove
+    that each note references a candidate-specific fact, and mark unrelated primary answers as
+    `context-drift` instead of returning an actionable verdict. Keep deterministic scoring independent
+    so local-model latency or context loss cannot block Vai's own evaluation loop.
+
+- **DONE 2026-07-19 - Frozen high-IQ reasoning spectrum + seven accepted self-improvement cycles**
+  - Added `scripts/vai-competition-v2.mts` and an immutable 45-scenario base with visible,
+    holdout, and mutation splits, followed by three frozen fresh waves. The combined set has 80
+    scenarios/85 turns and 21 category labels across compositional, adversarial, multi-step,
+    causal, planning, code, epistemic, memory/state, control, decision, and constructive reasoning.
+    Identity-blind scorer controls pass, JSON values are compared recursively, and reports include
+    per-category scores. Fingerprints and the no-task/no-scorer-edit rule are recorded in
+    `docs/vai-competition-v2-protocol.md`.
+  - Cycle 0 scored 4.0% overall, 9.2% visible, and 1.1% frozen holdout. Seven accepted iterations added
+    Vai-owned parsers, intermediate representations, executors, and invariant checks rather than
+    prompt answers: constraint graphs, set proofs/covers, causal controls, Bayes and throughput,
+    critical paths, alias/queue semantics, aggregation, conflicting evidence, safe destructive
+    clarification, spatial/recurrence/state rules, intervention-based belief revision,
+    contraposition, underdetermination, expected value, exact worker partitioning, `let` closures,
+    confounding, verified counterexamples, and corrected named-event ledgers. The post-saturation
+    cycle generalized these into coefficient-bearing linear equations, minimum-cost choices,
+    inclusive stepped closures, add/remove correction polarity, severity confounding,
+    posterior-to-policy composition, and enumerated Boolean fixed points.
+  - Final frozen visible and holdout scores are both 100%, reducing the dev/holdout gap from 8.1
+    points to zero. Fresh wave 1 improved 80.3% -> 100%; wave 2 improved 16.3% -> 100% across eight
+    new reasoning families. A third post-saturation wave then improved 28.7% -> 100% on paraphrases
+    and compositions. Expanded raw score is 79/80 (98.8%); valid-adjusted score is 79/79.
+    The sole raw miss is an immutable mutation whose reference says `22` for a recurrence that
+    evaluates to `30`. Vai returns the mathematically correct result, so the task is quarantined and
+    preserved rather than changing the scorer or engine to emit a known falsehood. Exact cycle and
+    category deltas are in `artifacts/vai-competition-v2/cycle-ledger.md`.
+  - ChatService now recognizes verified bounded reasoning as Vai-owned, prevents terminal/output
+    bridge routes from preempting simulated code traces, preserves multi-turn state, and bypasses
+    Council/response models for supported grammars. `/api/agent/introspect` exposes the policy,
+    representations, and all frozen wave fingerprints.
+  - Live proof after restart in conversation `01KXX0PJB6EC3Z7X0JS6K0CBEE`: Vai computed inventory
+    `25`, retained named events, then applied a correction and a new event to recompute `29` without
+    double application. Conversation `01KXX1QGR4185JFDH01SCME1BW` then composed a count posterior
+    (`90/(90+180)=33.3%`) with a strict `>40%` rejection policy and correctly chose not to reject.
+    The final focused bounded/ChatService/runtime set passed 47/47, full VaiEngine regression passed
+    430/430, scorer controls passed 6/6, `@vai/core` and `@vai/runtime` typechecks passed, live
+    introspection exposed the third-wave fingerprint, and the scoped diff check was clean.
+
+- **DONE 2026-07-19 - Sealed v3/v4 expert reasoning arena and typed deterministic kernels**
+  - Replaced the saturated recognizer-heavy arena with 305 frozen v3/v4 scenarios spanning
+    soundness controls, finite-model logic, CSPs, causal inference, exact scheduling, MiniJS,
+    uncertainty, event state, transaction anomalies, and multi-stage composition. The runner now
+    enforces pack/scorer/source fingerprints, fresh engines, shuffled-order determinism, strict
+    duplicate-key JSON, semantic schedule certificates, calibration, false-activation telemetry,
+    failed-representation clusters, and a scorer attack bank.
+  - V3 soundness began at 8.3% with 100% false activation; its first frontier exposure was 0/41.
+    General deterministic representations raised the final frozen v3 combined run to 209/209 with
+    100% bounded coverage/precision, zero false activation, and 100% determinism.
+  - V4 wave 1 first exposed one general multi-budget routing gap (57/60), then passed 60/60 after
+    all declared resource budgets became first-class constraints. The independently frozen wave 2
+    collapsed to 6/36 and identified ten new representation families; implementing those operators
+    raised the immutable raw score to 34/36 across three orders.
+  - The two residual wave-2 misses are proved oracle defects: both minimax tasks tie `B` and `C`,
+    but the generator silently demands lexical `B`. Vai now returns the explicit optimum set rather
+    than gaming the evaluator. The raw 34/36 and validity adjudication are both retained in
+    `docs/vai-competition-v4-protocol.md` and `artifacts/vai-competition-v4/cycle-ledger.md`.
+  - Added the expert representation inventory, containment policy, v3/v4 pack fingerprints, and
+    evaluation discipline to `/api/agent/introspect`. Verification at this checkpoint: 493/493
+    focused Core tests, 3/3 v4 scorer attacks, `@vai/core` typecheck, v3 209/209, v4 wave 1 60/60,
+    and legacy v2 79/80 raw (its sole miss is the preserved bad recurrence oracle).
+  - Speaking to the restarted runtime then found a second-order observability defect: verified
+    bounded turns answered correctly without models, but their persisted route plans were polluted
+    by a large set of irrelevant historical Council lessons. Bounded programs now bypass route
+    guidance loading as well as Council/response generation. Fresh conversation
+    `01KXX8XKTZ5H233FCEW3BHNEDA` returned both minimax optima in 2 ms under
+    `bounded-reasoning:advanced:minimax-regret`, with `hadGuidance=false`, no baseline, and no
+    guidance fields. The final affected ChatService/reasoning regression passed 128/128 and Core
+    typecheck remained clean.
+
+- **IN PROGRESS 2026-07-19 - Release-targeted global push-to-talk for fullscreen games**
+  - Replaced the polling/press-target/per-character path with a native Windows `RegisterHotKey`
+    owner and an immutable release snapshot (HWND, focused control, PID plus process-creation
+    identity, classes, monitor, window mode, and field evidence). Delivery removes that exact
+    release record and fails closed if the field, window, process, process generation, game, or
+    shell state changed. The production source now has no Unicode character-injection path and
+    exactly one `SendInput` site: a four-event scan-code `Ctrl+V`; acceptance is reported as
+    `sendinput-accepted`, never falsely as a confirmed paste.
+  - Added a clipboard transaction that preserves text or image data and restores only while Vai
+    still owns the temporary transcript. Refused/no-target routes deliberately leave the transcript
+    clipboard-ready. Every release and delivery outcome is JSONL logged without transcript text.
+    The overlay is no-activate/click-through, follows the target monitor, stays available over
+    borderless games, and has an audible fallback for exclusive fullscreen.
+  - Hardened League evidence so Enter arms chat, a later world click disarms it, and only a later
+    click in the League-specific input rectangle re-arms it. Other games do not inherit that
+    heuristic. Global STT is pinned to the fast local tier; model polishing cannot block paste.
+    Near-silence/electrical noise is rejected before Whisper, physical microphones can switch over
+    a stable audio graph, and long holds rotate into independently decodable 45-second segments
+    that transcribe serially while capture continues.
+  - Scaled deterministic competition evidence: 14/14 native tests pass, including a 48-state
+    window/PID/process-generation/focus/shell churn matrix with exactly one eligible identity, a
+    16-state hostile game-field truth table, and 9 no-field focus permutations. Focused audio tests
+    pass 11/11. Desktop TypeScript typecheck and Rust `cargo check` pass. The UI audit passes 24/24
+    theme/mode/viewport captures with no overflow, narrow-panel collapse, console errors, or unsafe
+    hotkey acceptance; four representative renders were visually inspected.
+  - Added a compiled native acceptance fixture at
+    `apps/desktop/src-tauri/src/bin/vai_ptt_target.rs`. It exposes real Win32 Edit controls in
+    windowed or borderless mode, supports deterministic field-A → world → field-B churn, and
+    records activation, focus, `WM_PASTE`, field contents, gameplay `WM_CHAR`, and summary counts.
+    `scripts/vai-ptt-target-audit.mjs` correlates that JSONL with Vai's release log and enforces 13
+    append-only checks: exact release process/field, fast STT, ≤1.5 s, one paste, zero gameplay
+    characters, release-time field only, clipboard restoration, and no target deactivation.
+    The fixture compiles cleanly and its audit controls pass 3/3 (canonical PASS plus duplicate,
+    gameplay-input, stale-field, latency, and focus-theft rejection attacks); its GUI run is still
+    pending the same native-launch approval.
+  - **Post-incident offline hardening (2026-07-19):** delivery now re-inspects the foreground,
+    focused control, process generation, and current game-field evidence immediately before the
+    sole `Ctrl+V` injection. It refuses late transcripts before injection and reports explicit
+    `clipboard-ready-field-closed` or `clipboard-ready-latency-exceeded` routes. Hotkey rebinding is
+    deferred until the active hold ends; audio cues now distinguish listening, release, paste,
+    clipboard-ready, silence, and error; microphone switches coalesce the newest request; and the
+    fast PTT Whisper model warms before the balanced model.
+  - The dangerous fixture driver no longer emits global Enter or mouse events and cannot move the
+    cursor: canonical churn is sent only to the exact, revalidated fixture HWND with `PostMessageW`.
+    The auditor now proves the full field-A -> world -> field-B sequence and rejects any transient
+    focus theft, even if the fixture later reactivates. A separate aggregate gate requires exactly
+    ten unique passing reports, both windowed and borderless coverage, at least three churn runs,
+    no focus theft, and every measured latency inside budget. The safety protocol is recorded in
+    `docs/vai-ptt-acceptance-protocol.md`; no fixture or automation may run while the owner is
+    playing, and real League checks are human-driven only.
+  - Latest offline evidence supersedes the earlier counts: Rust native tests pass 21/21; the
+    feature-disabled and explicitly armed fixture-driver builds both compile; the target auditor and
+    aggregate-gate controls pass 8/8; recorder/audio/STT tests pass 26/26; desktop and runtime
+    TypeScript typechecks pass; and the scoped whitespace check is clean. These results prove code
+    invariants only, not live delivery.
+  - **Open & paste contract update (2026-07-19):** the owner clarified that League chat should stay
+    closed during speech and that Vai must never send the message. The new explicit League mode now
+    takes the release snapshot, sends exactly one scan-code Enter to open chat, requires fresh
+    concrete `win32-caret` or focused-control proof in the identical HWND/PID/process generation,
+    sends one lexical Ctrl+V sequence, and stops. The owner reviews the text and presses Enter
+    manually. A failed Enter, held modifier, superseding input sequence, focus change, missed
+    deadline, or unproved post-open field leaves the transcript clipboard-ready. Geometry and old
+    click-region re-arming are no longer accepted as field proof.
+  - The safety implementation now uses a monotonic release deadline, a final identity/evidence check
+    immediately before Ctrl+V, exact cleanup key-ups after partial `SendInput`, lossless-only
+    clipboard capture with sequence-number ownership, and a frozen release-monitor overlay position.
+    Real games intentionally retain the transcript clipboard because Windows accepting Ctrl+V does
+    not prove the game consumed it; lossless restoration is asserted only by the deterministic
+    fixture. The fixture class is explicitly game-classified and its borderless window covers the
+    primary monitor so the real production classifier is exercised.
+  - Acceptance evidence is now schema 2 and binds four SHA-256 evidence files, unique run ID,
+    attempt, nonce, source fingerprint, exact target identity, workflow, and the shortcut Vai itself
+    reported at release. Each candidate must pass all 24 ordered checks, including explicit
+    no-final-Enter proof. The ten-run gate rejects
+    reused/fabricated/mixed-source evidence, requires both window modes, at least three churn runs,
+    at least one Open & paste run, supported chords throughout, and at least one proved `Win+Alt`
+    run. The driver supports the passively observed `Win+Alt` chord and the explicit
+    `Ctrl+Shift+Space` fallback, with RAII release of the matching keys.
+  - Latest offline evidence after this update: native Rust tests pass 32/32; manifest, attempt-plan,
+    target-auditor, and aggregate-gate controls pass 30/30; focused recorder/STT/preference/exact-fixture-text tests pass 21/21; desktop
+    TypeScript typecheck passes; the disabled driver and dangerous driver in both debug and release profiles compile.
+    No UI, hotkey, fixture, process, window, input, game, or installed-app action was performed while
+    the owner was playing. Visual/native/real-game proof remains open.
+  - Two independent senior source reviews caught and drove fixes for two false-positive acceptance
+    paths: the exact fixture could not enter the League-only Open & paste branch, and its accepted
+    Open & paste route could not schedule the restoration that the auditor required. Fixture entry
+    is now restricted to debug or the explicit dangerous acceptance feature and requires run ID,
+    transcript, create-new dedicated log, exact class/process,
+    and a matching `hotkey-ready` ownership handshake. The gate reparses raw evidence and recomputes
+    each candidate instead of trusting PASS flags; target/driver outputs refuse overwrite; driver
+    stages and external release-to-paste chronology are checked; and a post-paste Enter is an
+    explicit failure. Final modifier, evidence-sequence, identity, and deadline checks now sit at
+    both Enter and Ctrl+V boundaries, with sequence-specific partial-input cleanup. Exact-modifier
+    matching prevents Ctrl/Shift supersets from activating `Win+Alt`; evidence now rejects foreign
+    run rows, impossible/non-monotonic stage clocks, mismatched Vai log paths/process generations,
+    and any extra Enter before or after paste.
+  - Exact-executable and selection-bias evidence is substantially hardened offline: the formal
+    harness now requires a release build with embedded renderer assets, not mutable localhost/HMR.
+    Build.rs embeds one expanded source-closure fingerprint into Vai/target/driver; a create-new
+    manifest records exact release executable names/paths/sizes/hashes, and the driver hashes all
+    bytes twice before input. A ten-attempt plan fixes unique run IDs/nonces, workflows, modes,
+    shortcuts, and claim paths; claims carry exact plan/manifest/binary hashes, and a later attempt
+    cannot begin unless earlier claims succeeded. Auditors snapshot each file once for both parsing
+    and hashing, normalize Win32 extended paths, namespace release IDs by run, and reject overlapping
+    attempts. Ordinary local files remain owner-writable, so this is tamper-evident operational
+    evidence rather than WORM/code-signing proof.
+  - The final independent acceptance review found five additional offline blockers and each is now
+    regression-locked: fixture nonces bypass persisted speech-profile/prettify/model changes; the
+    embedded source closure includes shortcut, STT, transcript, and core polish dependencies; the
+    driver waits for the exact target process to terminate before succeeding its claim and the audit
+    requires that claim after the target summary; driver-log paths use canonical extended-Windows
+    comparison; and release IDs must be positive safe integers. The full ten-row attempt plan is also
+    validated for strict ordinals plus unique run IDs, nonces, and canonical absolute claim paths
+    before any claim or input.
+  - The last review pass also closed two timing/provenance gaps: clipboard validation can retry, so
+    exact evidence/deadline/physical-key/HWND/PID/process-generation/focus checks now run again after
+    clipboard validation immediately before the one Enter and both Ctrl+V sites; and the driver now
+    requires a run-bound renderer `acceptance-adapter-ready` acknowledgment so it cannot race the
+    React commit and accidentally exercise real STT. The source fingerprint now recursively covers
+    the complete desktop/Core/UI/API-types renderer source and workspace/build configuration rather
+    than a manually selected dependency list.
+  - Remaining honest acceptance limitations: League may not expose the Win32 caret/native-control
+    proof that the current safe post-Enter gate requires; the passive polled `Win+Alt` edge still
+    needs live latency/reliability proof. Clipboard snapshot/replacement and conditional restoration
+    now each use one valid Vai-window-owned Win32 transaction, refuse unsupported/multi-format lossy
+    backups, preallocate transcript and rollback storage before emptying, and revalidate clipboard
+    sequence plus exact text before Ctrl+V. Local evidence still cannot independently disprove
+    deliberate deletion/reconstruction or fully fabricated producer logs without an external
+    signed/WORM anchor. These remaining evidence/live gaps are not
+    offline PASS claims and keep the goal IN PROGRESS.
+  - **Not shipped / acceptance gate still open:** native GUI launch and the current production build
+    both require an out-of-sandbox process; the approval service rejected each request with a 503,
+    so no workaround was attempted. The canonical League sequence therefore remains 0/10 real-game
+    runs, including 0/3 churn runs. Exclusive fullscreen cueing, actual foreground non-theft,
+    release-to-paste latency, live mic switching, very-long-hold continuity, multi-monitor placement,
+    clipboard restoration, and game-exit refusal must be verified in the real packaged/native app
+    before this item can become DONE.
+  - **Safety incident and containment (2026-07-19):** two synthetic fixture runs failed because the
+    fixture did not retain foreground ownership. The second run could emit an Enter/click after the
+    target lost focus and coincided with disruption to the owner's active League session. Both runs
+    are invalid evidence. Live input/focus testing was stopped immediately; only the verified
+    workspace debug Vai process was stopped, and League/Riot plus the separately installed Vai app
+    were left untouched. The input-capable driver is now absent from normal builds behind the
+    explicit `dangerous-ptt-fixture` Cargo feature, requires a literal arming value plus expected
+    PID, and refuses unless the foreground HWND, PID, exact fixture window class, and exact fixture
+    executable remain stable. It no longer calls `SetForegroundWindow` or clicks to acquire focus,
+    and revalidates before every event. Both the normal disabled stub and dangerous feature path
+    compile, but no further live run is authorized while the owner is playing.
+
+- **IMPLEMENTED OFFLINE 2026-07-19 - Durable desktop authentication across restarts and updates**
+  - Root cause: device-link bearer credentials lived only in WebView `localStorage`, whose origin
+    differs between native dev (`localhost:5173`) and packaged desktop, while session verifiers also
+    depended on a configurable runtime secret. Repeated debug launches therefore surfaced separate
+    auth state, and runtime/update configuration changes could make a retained credential look dead.
+  - Native dev builds now use the existing loopback-only `devAuthBypass=1`, so acceptance shells do
+    not ask the owner to authenticate. Packaged Windows sessions migrate from WebView storage into
+    a user-bound DPAPI-protected app-data record and restore it before the first authenticated API
+    request. A transient anonymous response no longer destroys the retained desktop credential;
+    a new account login replaces it, while explicit logout clears both copies even if the runtime is
+    offline and reports failure rather than silently retaining an undeletable native credential.
+  - New sessions use a configuration-independent SHA-256 verifier over 384-bit random tokens.
+    Valid legacy sessions migrate on use, so unrelated runtime secret rotation no longer logs the
+    desktop out. Focused evidence: desktop persistence/dev-bypass plus runtime auth tests pass 23/23,
+    Windows DPAPI/native PTT tests pass 16/16, desktop and runtime TypeScript typechecks pass, and
+    both fixture compile modes pass. A normal packaged rebuild/relaunch and visible one-time legacy
+    migration check remain pending until it is safe to stop/restart the owner's running app.
+
+- **PROPOSED 2026-07-19 - V5 generated operator arena (500 cases, semantic certificates)**
+  - The post-v4 audit found that raw scenario multiplication would overstate coverage: most v4
+    families have three near-isomorphic variants, only schedule answers get dedicated semantic
+    certificate validation, metamorphic reporting does not validate the relation between variants,
+    and shuffled orders are not five true same-instance repeats.
+  - Added `docs/vai-competition-v5-protocol.md`: 13 typed kernels, five cross-kernel compositions,
+    a 72-scenario first sealed wave, approximately 500 full-scale generated cases, per-family
+    complexity staircases, matched ambiguity/inconsistency/unsupported/resource-limit controls,
+    a semantic-validator registry, independent oracles, scorer attacks, relation-level metamorphic
+    checks, scale curves, selective risk, true repeat determinism, and session-contamination probes.
+  - This remains PROPOSED until the generator, validators, manifest, first-exposure runner, and raw
+    baseline artifacts exist. Frozen v2-v4 packs must not be edited to create a favorable result.
+
+- **SHIPPED 2026-07-19 - Global dictation delivers into normal focused inputs after STT**
+  - Root cause: every target shared the 1.4-second game delivery deadline, measured from shortcut
+    release. Normal local/cloud transcription commonly finishes later, so a still-focused Chrome,
+    Facebook, Electron, WebView, terminal, or native edit field was downgraded to clipboard-only and
+    surfaced the copy card instead of receiving Ctrl+V.
+  - Normal applications now get a 30-second completion window while retaining the exact release
+    HWND, PID, process-generation, focused-control, modifier, clipboard-sequence, and final-boundary
+    checks. Games retain the existing 1.4-second gate and League Open-and-paste retains 1.2 seconds.
+  - Clipboard fallback is now an actionable, persistent card with native Copy, Close, focus-visible
+    controls, and cross-window dismissal. Only fallback/error cards accept pointer input; listening,
+    finalizing, and successful paste indicators remain non-activating and click-through.
+  - Offline evidence: desktop TypeScript typecheck and production Vite build pass; native Rust tests
+    pass 34/34, including Chrome host recognition, realistic normal-app STT latency, and bubble
+    interactivity routing. A browser-only render proves one Copy button plus two explicit Close
+    affordances with no overflow and zero renderer warnings/errors.
+    No native GUI, hotkey, clipboard mutation, or SendInput action was used for this verification;
+    one real Chrome/Facebook focused-composer hold remains the final live acceptance check.
+  - The first installed-app launch exposed a second concrete cause of false Copy fallback: Chrome
+    and other apps can leave multiple clipboard formats, while Vai's lossless transaction correctly
+    refuses to claim it can preserve an unsupported rich payload. A valid, unchanged focused input
+    now continues automatic delivery by replacing that clipboard with the transcript and deliberately
+    skipping restoration. No-input targets still receive the persistent Copy/Close card. The same
+    launch also exposed a packaged runtime import failure for externalized Playwright; the sidecar
+    builder now ships the Playwright dependency closure alongside the runtime bundle.
+  - The installed desktop app was stopped, rebuilt, synced, and relaunched. The release and installed
+    `veggaai.exe` are byte-identical (SHA-256
+    `AD672F8966970A523E70787D030E974553D9568B24D8E90322B61EB74CFC7CC2`), the installed runtime
+    contains both `playwright` and `playwright-core`, and its fresh boot passed module loading before
+    intentionally yielding port 3006 to the already-healthy Vai runtime. `/api/agent/introspect`
+    returned HTTP 200, and the installed native log records active `Win+Alt` ownership under the new
+    source fingerprint. The owner can now perform the remaining human acceptance check in any normal
+    composer: focus it, hold Win+Alt while speaking, and release to finalize and insert.
+
+- **SHIPPED 2026-07-20 - Ordinary current-price questions render as sourced answers in every depth**
+  - Root causes from the observed SNØ Oslo question: the broad price classifier treated venue
+    admission as a financial-market lookup; provider fan-out could consume the chat evidence budget;
+    a model/council draft could replace a complete retrieved answer with an unsupported live-data
+    decline; and a one-field JSON response envelope was presented as a code artifact.
+  - Venue admission pricing is now a distinct deterministic research intent. It prefers a matched
+    official product page (with a bounded retry for transient DNS/TLS misses) before broad provider fan-out, extracts labeled local-currency rows from
+    the live page, applies venue/answer-shape relevance gates, persists the source evidence, and ships
+    a complete cited price table directly instead of allowing a later model draft to overwrite it.
+    Generic one-field `answer`/`message`/`response`/`text` JSON envelopes are unwrapped only for
+    ordinary natural-language asks; explicit JSON requests and real structured payloads are preserved.
+  - Cold-cache WebSocket acceptance passed the exact question in Quick, Balanced, and Deep. Every
+    depth returned the same current labeled ticket/pass/membership rows from
+    `https://snooslo.no/no/products`, included the source, and avoided both JSON/code UI and the old
+    real-time-data decline. Focused core coverage passed 137/137, a post-latency-change subset passed
+    109/109, and `@vai/core` TypeScript typecheck passed.
+  - A real Chrome render against the desktop frontend passed with zero console errors. Screenshots
+    prove the answer as ordinary bullets and the open SNØ source rail at verified high trust / 90%
+    confidence under
+    `screenshots/admission-price-question/`. The installed desktop app was then stopped, rebuilt,
+    synced, and relaunched. Release and installed `veggaai.exe` are byte-identical (SHA-256
+    `533B7E5BC0FC818FDDB445638F6A559A42693FDB4EC054CDCD49C0FCFA9AEF4B`), the installed process is
+    running, and runtime health returned HTTP 200.
+
+- **SHIPPED 2026-07-20 - Venue follow-ups preserve the place, not the previous answer shape**
+  - Root cause: the contextual resolver's broad `what is ...` capture treated an earlier admission-
+    price question as the entity itself. A follow-up such as `what are their opening hours?` therefore
+    searched for a mixed price-and-hours query, and the correctly retrieved price table could win.
+    A later council draft could also replace a complete grounded hours answer, while the activity
+    strip could continue showing an earlier empty-search state after evidence arrived.
+  - Vai now has one deterministic practical-detail contract for hours, admission prices, menus, menu
+    prices, schedules, contact details, addresses, websites, parking, and accessibility. Follow-ups
+    carry forward only the venue identity, classify the newly requested detail independently, expand
+    wording variants by detail family, prefer a matched official page, and require the final answer's
+    shape to match the question before it can ship. Correct cited practical answers cannot be replaced
+    by an unrelated model/council draft. The search timeline now merges late source evidence into the
+    visible stage, and known official venue-detail pages receive the same high-trust treatment.
+  - The exact two-turn SNØ Oslo reproduction (prices, then `what are their opening hours?`) passed in
+    Quick, Balanced, and Deep with the official opening-hours URL, no price leakage, and no JSON/code
+    artifact. Focused core/desktop coverage passed 188/188 and both TypeScript typechecks passed. A
+    real Chrome render showed the normal hours answer, official source rail, and 90% confidence with
+    zero console errors; evidence is under `screenshots/venue-hours-followup/`. One browser harness
+    attempt immediately after a full cold runtime restart exceeded its 90-second UI deadline during
+    provider warm-up; it produced no contrary answer, the direct cold Quick WebSocket path had passed,
+    and the subsequent rendered run completed in 8.7 seconds.
+  - The installed desktop app was closed, rebuilt, synced, and relaunched. Release and installed
+    `veggaai.exe` are byte-identical (SHA-256
+    `032DE6FAAA2B4C8BF5C4DE81A280EFF5BEBDDABCB7E20649E853A051B9DBBA45`), the installed process is
+    running from `<installed-app>/veggaai.exe`, and `/health` returned `status: ok`
+    with engine `vai:v0`.
+
+- **SHIPPED 2026-07-22 - Arbitrary local-business practical questions use entity-first, first-party verification**
+  - Root cause from `when does the bakery on hommersåk open up? brygge bakeren`: the earlier
+    practical-detail work generalized the requested answer shape, but discovery still overfit known
+    venue pages. Conversational filler weakened search terms; a business homepage could lose its
+    footer address/phone during extraction; title suffixes made directories and newspapers look
+    first-party; low-trust hours could outrank an official tenant page; and browser-Google ran beside
+    the dedicated venue indexes, starving the official page reader and letting an apology or stale
+    directory schedule win.
+  - Practical queries now search the entity first with English/Norwegian detail variants, use
+    independent organic providers for ordinary local businesses, preserve stable first-party
+    contact/address signals, discover a containing retail venue from the verified location, and run
+    one bounded identity-verification pass. First-party trust requires the host itself to resemble
+    the venue rather than merely appearing in a title suffix; detail-shaped answers require a
+    high/medium-trust source, incomplete searches retry once, and partial failures are not cached.
+    Official pages are read in small prioritized batches, while heavyweight browser search is kept
+    out of venue-detail retrieval. The same path covers hours, menus/menu prices, admission,
+    schedules, contact/address/website, parking, and accessibility across places and services.
+  - The exact question passed cold/live WebSocket acceptance in Quick, Balanced, and Deep. Every
+    depth returned `Mandag – Fredag 05.00-18.00` and `Lørdag 05.00-17.00` with
+    `https://www.bryggensenter.no/butikkoversikt/` first, and rejected the stale 19:00 directory
+    result. Focused core coverage passed 181/181; core and desktop TypeScript typechecks passed.
+    A real Chrome render passed with zero console errors and showed the official source as high
+    trust; screenshots are under `screenshots/local-business-hours/`.
+  - The installed desktop app/runtime was closed, rebuilt, synced, and relaunched. Release and
+    installed `veggaai.exe` are byte-identical (SHA-256
+    `4419FD3530A72C8213AD6069A2804B98192A40E80A60E45ACC99CCAF1B8B7986`), the installed process is
+    running from `<installed-app>/veggaai.exe`, and `/health` returned `status: ok`.
+    Quick, Balanced, and Deep then passed again against the packaged runtime.
+
+- **SHIPPED 2026-07-22 - Global shop questions preserve wording, language, branch, and requested fact shape**
+  - The local-business discovery path now generalizes across store/shop/trading/holiday-hours wording,
+    close/shut/day-specific questions, and common Norwegian, Swedish, Danish, Spanish, French,
+    German, Italian, Portuguese, Dutch, Japanese, Chinese, and Korean cues. Entity extraction keeps
+    the brand plus branch/locality, and branch relevance rejects a same-chain result for the wrong
+    location.
+  - Official commerce pages are searched through localized entity-first and store-locator queries.
+    Vai reads schema.org hours, embedded retail hydration schedules, visible localized tables, split
+    label/time rows, AM/PM, dotted clocks, and `10–20 Uhr` forms. Dotted calendar dates such as
+    `01.01.` no longer count as a clock. Short official brand hosts such as `zara.com` and `ikea.com`
+    receive first-party treatment. Venue reads are serialized and trusted-source prioritized so
+    same-host locator downloads do not starve each other.
+  - Verified practical answers now bypass model rewriting. If only low-trust directories or
+    non-answering pages remain, the chat terminates with an explicit evidence limitation instead of
+    allowing a model to alter a time, price, address, or branch. This closed the live failure where
+    Zara's official `10:00` schedule was rewritten as `10:30`, and the earlier failure where a KaDeWe
+    holiday date was presented as an opening time.
+  - Cold/live WebSocket acceptance passed 6/6 Quick cases across Apple Fifth Avenue, Harrods
+    Knightsbridge, UNIQLO Ginza, Zara Gran Vía Madrid, IKEA Paris Rivoli, and KaDeWe Berlin. A
+    cross-mode subset passed 9/9 in Quick, Balanced, and Deep. Focused venue/search/chat coverage
+    passed 109/109 and `@vai/core` typecheck passed. The broader six-file run passed 215/216; its one
+    failure is an unrelated existing builder-routing expectation for `start building`, while all
+    venue/search/chat-service cases passed.
+  - A real desktop frontend render of the Spanish Zara wording passed with the exact official branch,
+    two high-trust `zara.com` sources, no `10:30` mutation, no JSON/code presentation, and zero console
+    errors. Evidence is under `screenshots/global-shop-practical/`.
+  - The desktop app was closed, rebuilt, synced, and relaunched. Release and installed `veggaai.exe`
+    are byte-identical (SHA-256
+    `640477B118A15E3FC54808AD01EF2CD05FC87B2978B8AB8CF8D2234EF61BBD12`). Port 3006 is owned by the
+    installed `<installed-app>/vai-runtime.exe` sidecar, `/health` reports `status:
+    ok`, and the installed runtime passed the six-country Quick matrix plus the 9/9 Quick/Balanced/Deep
+    subset again.
+
+- **SHIPPED 2026-07-22 - Nearest-branch menu questions resolve the branch before reading the menu**
+  - Root cause from `can you find meny of jønk' burgers closest to bygøy`: practical-detail routing
+    recognized `meny`, but entity extraction kept `closest to bygøy` inside the restaurant name. The
+    bounded reader then spent its page budget on Facebook and the popular Grønland ordering pages,
+    demoted JØNK's real first-party locator because its title did not repeat the complete hostname,
+    and treated exact Foodora/Wolt merchant menus as unknown low-trust pages. Chat correctly refused
+    low-trust evidence, but discovery had stopped one stage too early even though the itemized menu
+    was publicly available.
+  - Vai now parses composite `nearest/closest/near/nærmest` questions into a brand and geographic
+    anchor across common English, Norwegian, Spanish, French, German, Italian, Portuguese, and
+    Japanese wording. It searches the official branch list first, extracts brand-anchored location
+    labels while rejecting product rows, typo-corrects/geocodes the anchor through public map data,
+    compares branch areas deterministically, and only then performs an exact-branch detail search.
+    If branch comparison cannot be verified, another branch is never silently substituted.
+  - First-party recognition now supports short brand titles on category-suffixed official hosts.
+    Exact transactional merchant menu pages are medium trust only when venue identity and menu cues
+    match; the READ gate still requires at least three item/price rows. Menu synthesis emits clean
+    itemized bullets, removes delivery/service-fee noise, deduplicates localized copies of the same
+    merchant page, and keeps proximity evidence separate from menu evidence.
+  - The original typoed wording, a reordered English wording, and Norwegian `finn menyen ... nærmest`
+    wording passed 9/9 through the installed WebSocket path in Quick, Balanced, and Deep. Each chose
+    JØNK Colosseum (about 3.0 km straight-line from corrected Bygdøy), returned eight current menu
+    rows, cited the map comparison and exact Colosseum Foodora menu, and did not leak Grønland.
+    Focused venue/search/chat coverage passed 187/187 and `@vai/core` typecheck passed.
+  - A real Chrome render through the desktop composer passed with ordinary Markdown, the two-source
+    rail open, and zero console/page errors. Evidence is under `screenshots/nearest-venue-menu/`.
+    The desktop app was closed, rebuilt, synced, and relaunched; release and installed `veggaai.exe`
+    are byte-identical (SHA-256
+    `8DF84BC843962CCEB204A9135BB1A5D82809E97518B66F654428C3215CDC142B`). The installed app owns the
+    packaged `vai-runtime.exe`, `/health` reports `status: ok`, and the installed mode matrix passed
+    after deployment.
+
+- **SHIPPED 2026-07-22 - Venue web research generalizes across businesses, countries, details, and first-party PDFs**
+  - Root causes exposed by the JAFS follow-up were systemic, not venue-specific. The discovery path
+    assumed common branch markup, did not reliably derive a cold-start official domain for an
+    unknown brand/country, could mix a headquarters/global page with an exact branch, and stopped at
+    an HTML branch page instead of following its menu document. A legacy boundary handler also
+    intercepted any `find ... restaurant` request before the new research router. Finally,
+    `pdf-parse` worked in the source tree but esbuild broke its package-relative worker/canvas loader
+    in the installed runtime (`DOMMatrix is not defined` / `PDFParse is not a constructor`).
+  - Search now extracts branches from first-party locator links, cards, labeled text, and JSON-LD;
+    geocodes the user's anchor and official candidates with country/locality safety; selects the
+    nearest branch before looking up the requested fact; verifies likely official country domains;
+    retries thin indexes through one bounded browser search; follows same-site locator, menu, and PDF
+    resources; and extracts branch-scoped hours, contacts, addresses, menu rows, and Nordic prices.
+    Provider identity gates discard unrelated brands, exact-branch evidence outranks global pages,
+    and evidence limitations remain explicit when the requested fact cannot be verified.
+  - A persisted, bounded source-capability ledger now learns only from verified current pages. It
+    records that a domain can help discover locations or a particular practical-detail family and
+    reuses that knowledge as a discovery hint; it never promotes trust or bypasses current-page
+    verification. This lets Vai improve across equivalent future shops, restaurants, services, and
+    wording without adding venue allowlists or one-off JAFS/JONK rules.
+  - Live cross-country acceptance passed 4/4: Lawsons Camden nearest Trafalgar Square hours and
+    phone/email, plus JAFS Teisen nearest Helsfyr PDF menu and daily hours. The installed WebSocket
+    path passed the JAFS menu question in Quick, Balanced, and Deep with the same correct branch,
+    eight current item/price rows, OpenStreetMap proximity evidence, and first-party JAFS evidence.
+    Focused routing/venue/search/source-learning coverage passed 152/152, and the broader
+    engine/chat/search regression gate passed 754/754; core and runtime TypeScript typechecks passed.
+  - A real Chrome render through Vai's composer passed with normal answer typography, source chips,
+    the two-source rail open, and zero console/page errors. Evidence is under
+    `screenshots/general-venue/`. The full desktop app was closed, rebuilt, installed, and relaunched.
+    `pdf-parse`, `pdfjs-dist`, canvas assets, and the Windows native canvas binary are present beside
+    the packaged runtime. Release and installed `veggaai.exe` are byte-identical (SHA-256
+    `BD4CF243827F825CA0C79994B1FCDDDDE367E4F03E6B76F7E81FD688CAF6AA7E`), exactly one installed app
+    and sidecar are running, and `/health` reports `status: ok` with engine `vai:v0`.
+- **SHIPPED 2026-07-22 - Adoption foundations and four-phase end-to-end slices**
+  - Nineteen feature design notes were opened before implementation under
+    `docs/design/adoption/`. The schema-only `@vai/contracts` package now owns
+    UI/backend, agent/UI, environment, sharing, memory, and plugin/host boundary
+    schemas; the `@vai/constants` manifest owns persisted names, ports, public
+    endpoints, timeouts, and limits. A repository policy check rejects duplicated
+    platform literals.
+  - All supported external text surfaces now enter model context through one
+    sentinel-delimited untrusted-data wrapper plus a standing no-instruction
+    policy. Tool dispatch intersects host-owned workspace/session capabilities;
+    repo config and UI state cannot grant authority. Provider CLIs declare their
+    opaque capabilities and fail closed unless the host grant permits them. The
+    candid trust boundary and remaining OS-containment gaps are documented in
+    `docs/security/capability-threat-model.md`.
+  - Agent providers run behind protocol adapters, sessions default to isolated
+    worktrees from `origin/HEAD`, stream interruption is explicit/catch-up aware,
+    composer drafts are local-first, and memory/skills/personas are inspectable.
+    Agent-authored skills start flagged at low confidence; context injection is
+    budgeted by model window and tool schemas load on demand. Blind model A/B and
+    multi-persona prompts are available from Workspace & trust.
+  - Saved environments unify loopback/LAN/private-mesh/HTTPS/SSH endpoints. Active
+    environment changes refresh all live API bindings; pairing secrets are
+    single-use, hashed at rest, revocable, fragment-carried for web pairing, and
+    WebSocket credentials use a private subprotocol instead of URLs. SSH probes
+    Windows and POSIX version-manager locations and returns exact diagnostics.
+  - The Workspace & trust surface now shows capability grants, environments,
+    memory, skills, personas, model compare, selective shares, link/backlink
+    previews, hardware fit, and explicit subsystem degradation. Session views add
+    changed-files and timeline affordances; agent input accepts file drops; risky
+    approvals state the exact command, folder, persistence, and revoke effect.
+  - Backups include full legacy-compatible session history, omit credentials,
+    write an atomic folder plus SHA-256/byte manifest, and restore through a
+    merge-first dry run. A live 105.38 MB snapshot containing 1,038 sessions
+    exported and checksum-verified successfully; its restore dry run preserved all
+    1,038 current IDs and applied nothing. The temporary snapshot was removed.
+    Recovery steps are documented in `docs/operations/backup-restore.md`.
+  - Verification: contracts/constants/core/runtime/desktop typechecks passed; the
+    constants policy passed; 53 focused adoption/security tests and 154 existing
+    chat/session/venue tests passed. Real Chrome visual QA passed dark and light at
+    1920x540, 1440x810, 900x1200, and 390x844 with no horizontal overflow or
+    browser errors; file drag/drop also passed. Evidence is under
+    `.codex-run/adoption-visual/`.
+  - The desktop app/runtime were closed, the workspace dependency tree was
+    reconciled, and the native Tauri release was built, synced, and relaunched.
+    Release and installed `veggaai.exe` are byte-identical (SHA-256
+    `4DE816F4D26A12BE4CAE3981A1E4BA62921E9CAA757B312BF8BF094A9698F34E`), exactly
+    one installed app and sidecar are running, and packaged `/health` reports
+    `status: ok`. The installed Workspace & trust screen was captured at
+    `.codex-run/adoption-visual/installed-native-workspace-trust.png`.
+  - Honest follow-ups: macOS/Linux branches have unit coverage but still need
+    native CI/device proof; provider CLIs do not yet have portable OS-level
+    sandboxing; public-host provisioning, TLS/custom-domain attachment, and the
+    complete token-revocation UX remain deployment work rather than claimed as
+    production-complete.

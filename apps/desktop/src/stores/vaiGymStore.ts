@@ -6,6 +6,7 @@
  */
 
 import { create } from 'zustand';
+import { API_BASE } from '../lib/api.js';
 
 /* ── Constants ─────────────────────────────────────────────────── */
 
@@ -355,8 +356,6 @@ interface VaiGymState {
   /** Persist helper */
   _persist: () => void;
 }
-
-const API_BASE = 'http://localhost:3006';
 
 export const useVaiGymStore = create<VaiGymState>((set, get) => ({
   progress: getDefaultProgress(),

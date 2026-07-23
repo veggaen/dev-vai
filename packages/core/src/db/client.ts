@@ -239,6 +239,26 @@ const CREATE_TABLES_SQL = `
     updated_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS council_work_artifacts (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    sandbox_project_id TEXT,
+    project_name TEXT NOT NULL,
+    brief TEXT NOT NULL,
+    files TEXT NOT NULL,
+    validation TEXT NOT NULL,
+    reviews TEXT NOT NULL,
+    repairs_used INTEGER NOT NULL DEFAULT 0,
+    member_ids TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'applied', 'superseded')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_council_work_artifacts_conversation_status
+    ON council_work_artifacts(conversation_id, status, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_council_work_artifacts_sandbox_status
+    ON council_work_artifacts(sandbox_project_id, status);
+
   CREATE TABLE IF NOT EXISTS images (
     id TEXT PRIMARY KEY,
     conversation_id TEXT REFERENCES conversations(id),

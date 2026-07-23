@@ -1,17 +1,18 @@
 import { create } from 'zustand';
-import type {
-  CreateSessionResponse,
-  ImportSessionResponse,
-  SessionDetailResponse,
-  SessionEventListResponse,
-  SessionExportResponse,
-  SessionInsightsResponse,
-  SessionIntelligenceResponse,
-  SessionListResponse,
-  SessionPinnedEventsResponse,
-  SessionPinnedNotesResponse,
-  SessionSearchResponse,
-} from '@vai/api-types/session-responses';
+import {
+  createSessionResponseSchema,
+  importSessionResponseSchema,
+  sessionDetailResponseSchema,
+  sessionEventListResponseSchema,
+  sessionExportResponseSchema,
+  sessionInsightsResponseSchema,
+  sessionIntelligenceResponseSchema,
+  sessionListResponseSchema,
+  sessionPinnedEventsResponseSchema,
+  sessionPinnedNotesResponseSchema,
+  sessionSearchResponseSchema,
+} from '@vai/contracts/session-responses';
+import { LIMITS, TIMEOUTS_MS } from '@vai/constants';
 import { apiFetch } from '../lib/api.js';
 import type {
   AgentSession,
@@ -25,11 +26,15 @@ import type {
   SessionInsightsAggregate,
   PinnedNote,
   PinnedNoteCategory,
-} from '@vai/core/browser';
+} from '@vai/contracts/session-models';
 
-const SESSION_EVENT_PAGE_SIZE = 200;
-const CURSOR_SESSION_MAX_EVENTS = 5000;
-const AUTO_INTELLIGENCE_EVENT_LIMIT = 2000;
+const SESSION_EVENT_PAGE_SIZE = LIMITS.sessionEventPage;
+const CURSOR_SESSION_MAX_EVENTS = LIMITS.sessionMaxEvents;
+const AUTO_INTELLIGENCE_EVENT_LIMIT = LIMITS.sessionAutoIntelligenceEvents;
+
+async function parseJsonContract<T>(response: Response, schema: { parse(value: unknown): T }): Promise<T> {
+  return schema.parse(await response.json());
+}
 
 interface SessionState {
   /* Data */
@@ -167,7 +172,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       const res = await apiFetch(`/api/sessions?${params}`);
       if (!res.ok) throw new Error('Failed to fetch sessions');
-      const data = await res.json() as SessionListResponse;
+      const data = await parseJsonContract(res, sessionListResponseSchema);
       set({ sessions: data.sessions, totalSessions: data.total, isLoading: false });
     } catch (err) {
       console.error('Failed to fetch sessions:', err);
@@ -197,7 +202,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const sessionRes = await apiFetch(`/api/sessions/${id}`);
       if (!sessionRes.ok) throw new Error('Session not found');
 
-      const data = await sessionRes.json() as SessionDetailResponse;
+      const data = await parseJsonContract(sessionRes, sessionDetailResponseSchema);
       const eventTotal = data.eventCount ?? 0;
       const isCursorSession = data.session.tags?.includes('cursor-agent');
       const initialLimit = isCursorSession && eventTotal <= CURSOR_SESSION_MAX_EVENTS
@@ -209,7 +214,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
       if (!eventsRes.ok) throw new Error('Session not found');
 
-      const newestFirstEvents = await eventsRes.json() as SessionEventListResponse;
+      const newestFirstEvents = await parseJsonContract(eventsRes, sessionEventListResponseSchema);
       const initialEvents = [...newestFirstEvents].reverse();
       const isIntelligenceDeferred = eventTotal > AUTO_INTELLIGENCE_EVENT_LIMIT;
 
@@ -304,7 +309,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         body: JSON.stringify({ title, agentName, modelId }),
       });
       if (!res.ok) throw new Error('Failed to create session');
-      const { id } = await res.json() as CreateSessionResponse;
+      const { id } = await parseJsonContract(res, createSessionResponseSchema);
       await get().fetchSessions();
       return id;
     } catch (err) {
@@ -333,7 +338,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const res = await apiFetch(`/api/sessions/${id}/export`);
       if (!res.ok) throw new Error('Failed to export');
-      return await res.json() as SessionExportResponse;
+      return await parseJsonContract(res, sessionExportResponseSchema);
     } catch (err) {
       console.error('Failed to export session:', err);
       return null;
@@ -348,7 +353,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to import');
-      const { id } = await res.json() as ImportSessionResponse;
+      const { id } = await parseJsonContract(res, importSessionResponseSchema);
       await get().fetchSessions();
       return id;
     } catch (err) {
@@ -384,7 +389,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             `/api/sessions/${activeSessionId}/events?type=message&role=${role}&limit=5000&order=asc`,
           );
           if (!res.ok) return;
-          const rows = await res.json() as SessionEventListResponse;
+          const rows = await parseJsonContract(res, sessionEventListResponseSchema);
           set({ presetEvents: rows, presetEventsFor: preset });
           return;
         }
@@ -393,7 +398,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             `/api/sessions/${activeSessionId}/events?limit=${CURSOR_SESSION_MAX_EVENTS}&order=asc`,
           );
           if (!res.ok) return;
-          const rows = (await res.json() as SessionEventListResponse)
+          const rows = (await parseJsonContract(res, sessionEventListResponseSchema))
             .filter((e) => e.type === 'message' || e.type === 'thinking');
           set({ presetEvents: rows, presetEventsFor: preset });
         }
@@ -467,7 +472,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) throw new Error('Failed to fetch session intelligence');
-        return await res.json() as SessionIntelligenceResponse;
+        return await parseJsonContract(res, sessionIntelligenceResponseSchema);
       })();
 
       const insightsPromise = includeGlobal
@@ -476,7 +481,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               signal: AbortSignal.timeout(10_000),
             });
             if (!res.ok) throw new Error('Failed to fetch session insights');
-            return await res.json() as SessionInsightsResponse;
+            return await parseJsonContract(res, sessionInsightsResponseSchema);
           })()
         : Promise.resolve<SessionInsightsAggregate | null>(null);
 
@@ -534,7 +539,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const res = await apiFetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return;
 
-      const newEvents = await res.json() as SessionEventListResponse;
+      const newEvents = await parseJsonContract(res, sessionEventListResponseSchema);
 
       // Only update state if there are actually new events — zero-blink
       if (newEvents.length > 0) {
@@ -573,7 +578,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         `/api/sessions/${activeSessionId}/events?limit=${Math.min(eventTotal, CURSOR_SESSION_MAX_EVENTS)}&order=desc`,
       );
       if (!res.ok) throw new Error('Failed to load all events');
-      const newestFirst = await res.json() as SessionEventListResponse;
+      const newestFirst = await parseJsonContract(res, sessionEventListResponseSchema);
       const allEvents = [...newestFirst].reverse();
       set({
         events: allEvents,
@@ -604,7 +609,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
       if (!res.ok) throw new Error('Failed to load older events');
 
-      const olderNewestFirst = await res.json() as SessionEventListResponse;
+      const olderNewestFirst = await parseJsonContract(res, sessionEventListResponseSchema);
       const olderEvents = [...olderNewestFirst].reverse();
 
       set((state) => ({
@@ -624,7 +629,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error('Failed to fetch session insights');
-      const data = await res.json() as SessionInsightsResponse;
+      const data = await parseJsonContract(res, sessionInsightsResponseSchema);
       set({ sessionInsights: data });
     } catch (err) {
       console.error('Failed to fetch session insights:', err);
@@ -632,7 +637,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   /* ── Live polling controls ────────────────────────────────── */
-  startPolling: (intervalMs = 2000) => {
+  startPolling: (intervalMs = TIMEOUTS_MS.sessionPolling) => {
     const { pollIntervalId } = get();
     if (pollIntervalId) return; // Already polling
 
@@ -670,7 +675,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (activeSessionId) params.set('sessionId', activeSessionId);
       const res = await apiFetch(`/api/sessions/search?${params}`);
       if (!res.ok) throw new Error('Search failed');
-      const data = await res.json() as SessionSearchResponse;
+      const data = await parseJsonContract(res, sessionSearchResponseSchema);
       set({ searchResults: data.results, isSearching: false });
     } catch (err) {
       console.error('Search failed:', err);
@@ -685,7 +690,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const res = await apiFetch(`/api/sessions/${sessionId}/pinned`);
       if (!res.ok) return;
-      const data = await res.json() as SessionPinnedEventsResponse;
+      const data = await parseJsonContract(res, sessionPinnedEventsResponseSchema);
       set({ pinnedEvents: data.events });
     } catch {
       // Silent
@@ -723,7 +728,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const res = await apiFetch(`/api/sessions/${sessionId}/notes`);
       if (!res.ok) return;
-      const data = await res.json() as SessionPinnedNotesResponse;
+      const data = await parseJsonContract(res, sessionPinnedNotesResponseSchema);
       set({ pinnedNotes: data.notes });
     } catch {
       // Silent

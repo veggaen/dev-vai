@@ -30,3 +30,11 @@ export type {
   OnSearchLearn,
 } from './types.js';
 export { DEFAULT_SEARCH_CONFIG } from './types.js';
+
+export { WebSourceCapabilityLedger, webSourceSubjectKey } from './web-source-capabilities.js';
+export type {
+  WebSourceCapability,
+  WebSourceCapabilityObservation,
+  WebSourceCapabilitySnapshot,
+  WebSourceCapabilityStat,
+} from './web-source-capabilities.js';

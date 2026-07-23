@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, type VaiDatabase, schema } from '@vai/core';
+import { and, desc, eq, type VaiDatabase, schema, wrapUntrustedContent, UNTRUSTED_CONTENT_POLICY } from '@vai/core';
+import { governedMemorySchema, type GovernedMemory } from '@vai/contracts/adoption';
 
 /**
  * Vai Memory service — extract, store, and govern durable memories mined from
@@ -53,9 +54,14 @@ function buildExtractionPrompt(transcript: string): string {
     'Rules: skip pleasantries, one-off questions, and anything transient. content is one concise sentence.',
     'sourceExcerpt is a short verbatim quote from the transcript that supports it.',
     'If nothing is worth remembering, return [].',
+    UNTRUSTED_CONTENT_POLICY,
     '',
     'Transcript:',
-    transcript.length > 6000 ? transcript.slice(0, 3000) + '\n...\n' + transcript.slice(-3000) : transcript,
+    wrapUntrustedContent(
+      'memory',
+      transcript.length > 6000 ? transcript.slice(0, 3000) + '\n...\n' + transcript.slice(-3000) : transcript,
+      { source: 'conversation transcript' },
+    ),
   ].join('\n');
 }
 
@@ -123,10 +129,45 @@ export class MemoryService {
       .run();
   }
 
+  update(userId: string, id: string, patch: { kind?: MemoryKind; content?: string; sourceExcerpt?: string | null }): MemoryRow | null {
+    const current = this.list(userId, true).find((memory) => memory.id === id);
+    if (!current) return null;
+    this.db.update(schema.memories)
+      .set({
+        ...(patch.kind ? { kind: patch.kind } : {}),
+        ...(patch.content !== undefined ? { content: patch.content.trim().slice(0, 400) } : {}),
+        ...(patch.sourceExcerpt !== undefined ? { sourceExcerpt: patch.sourceExcerpt?.trim().slice(0, 400) ?? null } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.memories.id, id), eq(schema.memories.userId, userId)))
+      .run();
+    return this.list(userId, true).find((memory) => memory.id === id) ?? null;
+  }
+
   remove(userId: string, id: string): void {
     this.db.delete(schema.memories)
       .where(and(eq(schema.memories.id, id), eq(schema.memories.userId, userId)))
       .run();
+  }
+
+  restore(userId: string, records: readonly GovernedMemory[], overwrite: boolean): number {
+    const existing = new Set(this.list(userId, true).map((record) => record.id));
+    let applied = 0;
+    for (const input of records) {
+      const record = governedMemorySchema.parse({ ...input, userId });
+      if (existing.has(record.id)) {
+        if (!overwrite) continue;
+        this.remove(userId, record.id);
+      }
+      this.db.insert(schema.memories).values({
+        ...record,
+        userId,
+        createdAt: new Date(record.createdAt),
+        updatedAt: new Date(record.updatedAt),
+      }).run();
+      applied += 1;
+    }
+    return applied;
   }
 
   /**

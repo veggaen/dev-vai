@@ -99,4 +99,9 @@ letterbox, portrait, touch). Its "Definition of PASS" extends gate 5 below.
 1. Read `GET /api/agent/introspect` + this file.
 2. Observe real turns (WS stages, ThinkingPanel, eval scripts) and the
    sandbox artifacts in `%LOCALAPPDATA%\Temp\vai-sandbox\`.
-3. Recor
+3. Record findings/proposals in `docs/vai-improvement-backlog.md`
+   (append, dated, with evidence). That file is the shared queue between
+   V3gga, Vai, and agents.
+4. Implement behind tests (`packages/core` vitest) + typecheck, then verify
+   live (visible run + screenshots) before claiming success.
+5. Update memory/backlog with what was proven, including failures.

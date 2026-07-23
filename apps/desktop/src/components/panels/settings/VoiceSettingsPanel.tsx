@@ -13,6 +13,7 @@ import {
   type SttQuality,
 } from '../../../lib/voice/stt-quality.js';
 import type { MicDevice, SttError } from '../../../lib/voice/stt-adapter.js';
+import { useGameDictationStore } from '../../../stores/gameDictationStore.js';
 
 const INPUT_KEY = 'vai-voice-device';
 const OUTPUT_KEY = 'vai-voice-output';
@@ -191,6 +192,8 @@ export function VoiceSettingsPanel() {
   const [micTriggerMode, setMicTriggerMode] = useState<MicTriggerMode>(() => loadMicTriggerMode());
   const [sttQuality, setSttQuality] = useState<SttQuality>(() => loadSttQuality());
   const [livePreview, setLivePreview] = useState(() => loadLivePreviewEnabled());
+  const leagueOpenAndPaste = useGameDictationStore((state) => state.leagueOpenAndPaste);
+  const setLeagueOpenAndPaste = useGameDictationStore((state) => state.setLeagueOpenAndPaste);
 
   const [vizMode, setVizMode] = useState<VizMode>(() => {
     const stored = loadStored(VIZ_KEY);
@@ -565,6 +568,24 @@ export function VoiceSettingsPanel() {
               }`}
             >
               {livePreview ? 'On - fast draft while speaking' : 'Off - final text only on release'}
+            </button>
+          </SettingsField>
+
+          <SettingsField
+            label="League Open & paste"
+            hint="Keep chat closed while speaking. On release, Vai verifies the same League window, opens chat with one Enter, and pastes. You always press Enter yourself to send. If the field cannot be proven, Vai stops with the transcript on your clipboard."
+          >
+            <button
+              type="button"
+              onClick={() => setLeagueOpenAndPaste(!leagueOpenAndPaste)}
+              aria-pressed={leagueOpenAndPaste}
+              className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+                leagueOpenAndPaste
+                  ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                  : 'border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] text-[color:var(--color-muted)] hover:text-[color:var(--fg)]'
+              }`}
+            >
+              {leagueOpenAndPaste ? 'On - open chat and paste' : 'Off - paste only into an open field'}
             </button>
           </SettingsField>
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 
 import { AnimatePresence, motion } from 'framer-motion';
@@ -32,6 +32,7 @@ import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';
 import { isDevAuthBypassEnabled } from './lib/dev-auth-bypass.js';
 import { applyThemeById, getActiveThemeId } from './lib/odysseus-theme.js';
+import { hydrateApiSessionToken } from './lib/api.js';
 import { VaiMark } from './components/brand/VaiMark.js';
 
 
@@ -100,6 +101,7 @@ function PanelLoading() {
 
 /* ── Main app ── */
 export function App() {
+  const [authHydrated, setAuthHydrated] = useState(false);
   const { status, hasEverConnected, startPolling } = useEngineStore();
   const authEnabled = useAuthStore((state) => state.enabled);
   const authStatus = useAuthStore((state) => state.status);
@@ -120,6 +122,7 @@ export function App() {
   } = useLayoutStore();
   const { deployPhase, status: sandboxStatus } = useSandboxStore();
   const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const fetchConversations = useChatStore((s) => s.fetchConversations);
   const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
   const devAuthBypassEnabled = isDevAuthBypassEnabled();
   const prevRevealPreviewRef = useRef(
@@ -133,18 +136,32 @@ export function App() {
 
   useEffect(() => { startPolling(); }, [startPolling]);
   useEffect(() => {
+    if (status !== 'ready') return;
+    if (authEnabled && authStatus !== 'authenticated' && !devAuthBypassEnabled) return;
+    void fetchConversations();
+  }, [authEnabled, authStatus, devAuthBypassEnabled, fetchConversations, status]);
+  useEffect(() => {
     startVinextPolling();
     return () => stopVinextPolling();
   }, [startVinextPolling, stopVinextPolling]);
   useEffect(() => {
-    void useSettingsStore.getState().fetchBootstrap().then((bootstrap) => {
-      useAuthStore.getState().syncBootstrap(bootstrap?.auth);
-      const defaultMode = useSettingsStore.getState().defaultConversationMode;
-      useLayoutStore.getState().setMode(defaultMode);
-      return useAuthStore.getState().fetchSession();
-    });
+    let active = true;
+    void hydrateApiSessionToken()
+      .then(() => useSettingsStore.getState().fetchBootstrap())
+      .then((bootstrap) => {
+        if (!active) return;
+        useAuthStore.getState().syncBootstrap(bootstrap?.auth);
+        const defaultMode = useSettingsStore.getState().defaultConversationMode;
+        useLayoutStore.getState().setMode(defaultMode);
+        return useAuthStore.getState().fetchSession();
+      })
+      .finally(() => {
+        if (active) setAuthHydrated(true);
+      });
+    return () => { active = false; };
   }, []);
   useEffect(() => {
+    if (!authHydrated) return;
     if (status !== 'ready') return;
     if (bootstrap && models.length > 0 && frontends.length > 0) return;
 
@@ -152,7 +169,7 @@ export function App() {
       useAuthStore.getState().syncBootstrap(nextBootstrap?.auth);
       return useAuthStore.getState().fetchSession();
     });
-  }, [bootstrap, frontends.length, models.length, status]);
+  }, [authHydrated, bootstrap, frontends.length, models.length, status]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
@@ -504,4 +521,3 @@ export function App() {
     </>
   );
 }
-   

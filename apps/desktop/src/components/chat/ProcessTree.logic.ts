@@ -1,5 +1,5 @@
 import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore.js';
-import type { AdvisorTrace } from '@vai/api-types/chat-ws';
+import type { AdvisorTrace } from '@vai/contracts/chat-ws';
 import { enrichProgressStepsWithCouncil } from './process-step-enrich.js';
 import { stripAnsi } from '../../lib/strip-ansi.js';
 import {
@@ -886,4 +886,51 @@ function buildActivityMap(steps: readonly ChatProgressStep[]): ProcessNode | nul
 function formatCompactMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+/* ── Time spectrum — "where did the time go", as data ─────────────────────
+   One segment per timed step, share-of-total, colored by the step's tone.
+   Pure derivation from the raw steps so the settled summary can render a
+   proportional strip instead of a bare total. Segments under 1% are merged
+   into their neighbor so the strip never shows unreadable slivers. */
+
+export interface SpectrumSegment {
+  readonly stage: string;
+  readonly label: string;
+  readonly tone: ProcessTone;
+  readonly ms: number;
+  /** 0–1 share of the summed step time. */
+  readonly share: number;
+}
+
+export function buildTimeSpectrum(steps: readonly ChatProgressStep[]): SpectrumSegment[] {
+  const timed = steps.filter((s) => (s.durationMs ?? 0) > 0);
+  const total = timed.reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+  if (total <= 0 || timed.length < 2) return [];
+  const segments: SpectrumSegment[] = [];
+  for (const step of timed) {
+    const ms = step.durationMs ?? 0;
+    const share = ms / total;
+    const tone = toneForStage(step.stage);
+    const prev = segments[segments.length - 1];
+    // Merge sub-1% slivers (and same-tone neighbors under 4%) into the previous
+    // segment so the strip stays legible at 160px wide.
+    if (prev && (share < 0.01 || (prev.tone === tone && share < 0.04))) {
+      segments[segments.length - 1] = {
+        ...prev,
+        ms: prev.ms + ms,
+        share: prev.share + share,
+        label: prev.tone === tone ? prev.label : `${prev.label} +`,
+      };
+      continue;
+    }
+    segments.push({
+      stage: step.stage,
+      label: `${shortLabelForStage(step.stage, step.label)} — ${formatCompactMs(ms)}`,
+      tone,
+      ms,
+      share,
+    });
+  }
+  return segments;
 }

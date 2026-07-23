@@ -27,8 +27,9 @@ import {
   sandboxSearchBodySchema,
   sandboxReplaceBodySchema,
   sandboxSwitchLaneBodySchema,
-} from '@vai/api-types/sandbox';
+} from '@vai/contracts/sandbox';
 import { invalidRequestBody } from '../validation/http-validation.js';
+import { runLocalVisualLayoutAudit } from '../sandbox/visual-layout-audit.js';
 
 async function getViewerUserId(auth: PlatformAuthService, request: FastifyRequest): Promise<string | null> {
   const viewer = await auth.getViewer(request);
@@ -534,6 +535,24 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
             }
           : null,
       };
+    },
+  );
+
+  /** Render the live app at three widths and audit relational layout geometry. */
+  app.post<{ Params: { id: string } }>(
+    '/api/sandbox/:id/visual-audit',
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) return project;
+      if (!project.devPort || !project.devProcess) {
+        return reply.status(409).send({ error: 'The App must be running before visual layout audit.' });
+      }
+      try {
+        return await runLocalVisualLayoutAudit(`http://localhost:${project.devPort}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply.status(503).send({ error: `Visual layout audit unavailable: ${message.slice(0, 500)}` });
+      }
     },
   );
 

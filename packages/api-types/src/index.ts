@@ -1,8 +1,8 @@
 /**
- * @vai/api-types — Zod schemas + inferred types for VAI HTTP/WebSocket boundaries.
+ * @vai/contracts — schema-only Zod contracts for VAI process boundaries.
  *
- * Prefer subpath imports (`@vai/api-types/conversations`) for clearer deps.
- * Server: validate with `.safeParse()`. Client: `import type` from `./responses` only.
+ * Prefer subpath imports (`@vai/contracts/conversations`) for clear ownership.
+ * This package contains schemas and inferred types only; business logic belongs elsewhere.
  */
 export * from './chat-ws.js';
 export * from './companion-context.js';
@@ -18,3 +18,4 @@ export * from './ide-ws.js';
 export * from './responses.js';
 export * from './session-responses.js';
 export * from './project-responses.js';
+export * from './adoption.js';

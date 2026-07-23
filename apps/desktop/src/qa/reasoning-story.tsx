@@ -110,4 +110,112 @@ const softwareSteps: ChatProgressStep[] = [
     detail: 'Review found five blocking API and constructor issues that required another pass.',
     durationMs: 7_100,
     councilMembers: [
-      { name: 'Qwen code reviewer', verdict: 'needs-work', confidence: 0.86, note: 'Correct the Ignition constructor arguments and preserve ev
+      { name: 'Qwen code reviewer', verdict: 'needs-work', confidence: 0.86, note: 'Correct the Ignition constructor arguments and preserve every root package key.' },
+    ],
+  },
+  {
+    stage: 'council-repair',
+    label: 'Edit repair pass 2/2 fixed the blocking findings',
+    status: 'done',
+    detail: 'Kept the previous proposal until the replacement reduced the measured issue count.',
+    durationMs: 12_500,
+  },
+  {
+    stage: 'council-validate',
+    label: 'Running the final static and scope checks',
+    status: 'running',
+    detail: 'Checking file boundaries, package preservation, TypeScript syntax, and test intent before review is offered.',
+    toolRuns: [
+      { id: 'typecheck', name: 'TypeScript validation', status: 'done', success: true, durationMs: 2_300, output: '0 syntax errors in the proposed TypeScript files.' },
+      { id: 'scope', name: 'Scope boundary check', status: 'running', input: 'Expected paths: package.json and chain/**' },
+    ],
+  },
+] as unknown as ChatProgressStep[];
+
+// 40-step stress fixture — the perf budget: drag/zoom must stay smooth (transform-only work)
+// and the fit/minimap must remain usable at this density.
+const manySteps: ChatProgressStep[] = Array.from({ length: 40 }, (_, i) => {
+  const kinds = [
+    { stage: 'search', label: 'Gather evidence' },
+    { stage: 'reason', label: 'Reason' },
+    { stage: 'vai-draft', label: 'Drafting' },
+    { stage: 'quality-check', label: 'Verify' },
+  ];
+  const k = kinds[i % kinds.length];
+  return {
+    stage: `${k.stage}-${i}`,
+    label: `${k.label} ${i + 1}`,
+    status: 'done',
+    detail: `Step ${i + 1} of a very long turn.`,
+    durationMs: 300 + (i % 7) * 250,
+  };
+}) as unknown as ChatProgressStep[];
+
+function Story() {
+  return (
+    <div style={{ maxWidth: 760, margin: '3rem auto', padding: '0 1.5rem' }}>
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        Software work journal — customer summary + apprentice narration
+      </h2>
+      <div style={{ marginBottom: 48 }} data-testid="software-work-story">
+        <TurnProcessSection isStreaming steps={softwareSteps} workKind="software" outputFileCount={6} durationMs={98_000} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        Software work journal — settled customer receipt
+      </h2>
+      <div style={{ marginBottom: 48 }} data-testid="software-work-settled-story">
+        <TurnProcessSection
+          isStreaming={false}
+          steps={softwareSteps.map((step) => ({ ...step, status: 'done' as const }))}
+          workKind="software"
+          outputFileCount={6}
+          durationMs={98_000}
+        />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        ReasoningFlow — settled turn
+      </h2>
+      <div style={{ marginBottom: 48 }}>
+        <ReasoningFlow steps={steps} council={council} live={false} durationMs={10180} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        ReasoningFlow — long, multi-round turn (zoom · pan · minimap)
+      </h2>
+      <div style={{ marginBottom: 48 }}>
+        <ReasoningFlow steps={longSteps} council={council} live={false} durationMs={23460} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        ReasoningFlow — 40-step stress fixture (perf budget)
+      </h2>
+      <div style={{ marginBottom: 48 }} data-testid="many-step-story">
+        <ReasoningFlow steps={manySteps} live={false} durationMs={64000} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        TurnProcessSection — settled rest (one line, click to expand)
+      </h2>
+      <div style={{ marginBottom: 48 }} data-testid="settled-collapse-story">
+        <TurnProcessSection isStreaming={false} steps={longSteps} council={council} durationMs={23460} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        ReasoningFlow — live turn
+      </h2>
+      <ReasoningFlow
+        steps={[...steps.slice(0, 2), { ...steps[2], status: 'running' } as ChatProgressStep]}
+        council={council}
+        live
+      />
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <Story />
+  </StrictMode>,
+);

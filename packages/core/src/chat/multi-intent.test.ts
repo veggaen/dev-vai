@@ -34,6 +34,16 @@ describe('detectMultiIntent — decomposes distinct asks in one message', () => 
     expect(r.isMultiIntent).toBe(false);
   });
 
+  it('keeps trailing build requirements inside one build contract', () => {
+    const r = detectMultiIntent(
+      'Build a polished offline reading tracker app with searchable book cards, status filters, progress controls, a stats header, and persistent local state. Make it runnable in the App view.',
+    );
+    expect(r.isMultiIntent).toBe(false);
+    expect(r.parts).toHaveLength(1);
+    expect(r.parts[0]?.action).toBe('build');
+    expect(r.parts[0]?.text).toContain('persistent local state');
+  });
+
   it('leaves a plain single ask single', () => {
     expect(detectMultiIntent('What are great tools for computer intelligence?').isMultiIntent).toBe(false);
     expect(detectMultiIntent('Build me a Next.js todo app.').isMultiIntent).toBe(false);

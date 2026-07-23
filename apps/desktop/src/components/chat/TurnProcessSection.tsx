@@ -99,4 +99,16 @@ export function TurnProcessSection({
 /** Subscribe to the Timeline-view flag (same-tab + cross-tab changes). */
 function useTimelineView(): boolean {
   const [enabled, setEnabled] = useState(isTimelineViewEnabled);
-  useEffect(() => 
+  useEffect(() => {
+    const update = () => setEnabled(isTimelineViewEnabled());
+    window.addEventListener('vai-timeline-view-change', update);
+    window.addEventListener('storage', update);
+    return () => {
+      window.removeEventListener('vai-timeline-view-change', update);
+      window.removeEventListener('storage', update);
+    };
+  }, []);
+  return enabled;
+}
+
+export default TurnProcessSection;

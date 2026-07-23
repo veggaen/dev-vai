@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Copy, Settings, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Check, Copy, X } from 'lucide-react';
 
 /**
  * Standalone dictation bubble — the UI for dictating while ANOTHER app is
@@ -17,11 +17,24 @@ export type BubblePhase =
   | { kind: 'listening'; interim: string; level?: number }
   | { kind: 'transcribing' }
   | { kind: 'polishing'; raw: string }
-  | { kind: 'pasted'; text: string; via?: 'paste' | 'type' | 'clipboard' }
+  | { kind: 'pasted'; text: string; via?: 'paste' | 'clipboard' }
   | { kind: 'modal'; text: string }
   | { kind: 'error'; message: string };
 
 const BAR_COUNT = 14;
+
+function readDevPreviewPhase(): BubblePhase | null {
+  if (!import.meta.env.DEV) return null;
+  const preview = new URLSearchParams(window.location.search).get('preview');
+  if (preview === 'dictation-clipboard') {
+    return {
+      kind: 'pasted',
+      via: 'clipboard',
+      text: 'This transcript stayed safe because the original input could not be verified.',
+    };
+  }
+  return null;
+}
 
 async function invoke(cmd: string, args?: Record<string, unknown>): Promise<void> {
   const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
@@ -29,18 +42,16 @@ async function invoke(cmd: string, args?: Record<string, unknown>): Promise<void
 }
 
 export function DictationBubble() {
-  const [phase, setPhase] = useState<BubblePhase | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [phase, setPhase] = useState<BubblePhase | null>(readDevPreviewPhase);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   // Rolling mic-level history drives the bar heights (newest on the right).
   const [levels, setLevels] = useState<number[]>(() => Array<number>(BAR_COUNT).fill(0));
-  const lastKindRef = useRef<string>('');
 
   useEffect(() => {
     const onPhase = (e: Event) => {
       const next = (e as CustomEvent<BubblePhase>).detail ?? null;
       setPhase(next);
-      if (next?.kind !== lastKindRef.current) setCopied(false);
-      lastKindRef.current = next?.kind ?? '';
+      setCopyState('idle');
       if (next?.kind === 'listening') {
         setLevels((prev) => [...prev.slice(1), Math.min(1, Math.max(0, next.level ?? 0))]);
       } else if (!next || next.kind === 'pasted' || next.kind === 'error') {
@@ -53,21 +64,19 @@ export function DictationBubble() {
 
   const close = useCallback(() => {
     setPhase(null);
-    void invoke('dictation_bubble_hide');
+    void invoke('dictation_bubble_hide').catch(() => {
+      // The local browser preview has no native bridge; the UI is already closed.
+    });
   }, []);
 
   const copy = useCallback(async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch { /* text is already on the OS clipboard from the Rust side */ }
+      await invoke('copy_dictation_text', { text });
+      setCopyState('copied');
+    } catch {
+      setCopyState('error');
+    }
   }, []);
-
-  const openSettings = useCallback(() => {
-    void invoke('focus_main_window');
-    close();
-  }, [close]);
 
   // Escape closes from the keyboard (accessibility-first).
   useEffect(() => {
@@ -76,15 +85,14 @@ export function DictationBubble() {
     return () => window.removeEventListener('keydown', onKey);
   }, [close]);
 
-  // Auto-dismiss the "Pasted"/"Typed" confirmation from HERE, not the main window:
+  // Auto-dismiss only the successful paste confirmation from HERE, not the main window:
   // this bubble stays visible while another app is focused, so its timer fires on
   // time, whereas the backgrounded main window's timers get throttled by WebView2
-  // (the cause of the toast getting stuck). Clipboard-only ("press Ctrl+V") lingers
-  // longer so the user has time to paste; modal/error stay until dismissed.
+  // (the cause of the toast getting stuck). Actionable clipboard/error cards stay
+  // until the user uses their real Close button.
   useEffect(() => {
-    if (phase?.kind !== 'pasted') return;
-    const ms = phase.via === 'clipboard' ? 4200 : 1200;
-    const t = window.setTimeout(() => close(), ms);
+    if (phase?.kind !== 'pasted' || phase.via === 'clipboard') return;
+    const t = window.setTimeout(() => close(), 1200);
     return () => window.clearTimeout(t);
   }, [phase, close]);
 
@@ -132,7 +140,7 @@ export function DictationBubble() {
       <div className="vai-bubble" role="status" aria-live="polite">
         <div className="vai-bubble-pill ok" aria-label="Delivered">
           <Check size={13} className="vai-bubble-ok" aria-hidden />
-          <span className="vai-bubble-pill-label">{phase.via === 'type' ? 'Typed' : 'Pasted'}</span>
+          <span className="vai-bubble-pill-label">Paste sent</span>
         </div>
       </div>
     );
@@ -157,31 +165,34 @@ export function DictationBubble() {
             </>
           )}
           <span className="vai-bubble-spacer" />
-          <button type="button" className="vai-bubble-icon" title="Voice settings" onClick={openSettings}>
-            <Settings size={14} />
-          </button>
-          <button type="button" className="vai-bubble-icon" title="Close (Esc)" onClick={close}>
-            <X size={14} />
+          <button
+            type="button"
+            className="vai-bubble-icon"
+            aria-label="Close dictation"
+            title="Close"
+            onClick={close}
+          >
+            <X size={14} aria-hidden />
           </button>
         </div>
 
         {phase.kind === 'error' ? (
-          <>
-            <div className="vai-bubble-text">{phase.message}</div>
-            <div className="vai-bubble-actions">
-              <button type="button" className="vai-bubble-btn" onClick={openSettings}>
-                <Settings size={13} />
-                Voice settings
-              </button>
-            </div>
-          </>
+          <div className="vai-bubble-text">{phase.message}</div>
         ) : (
           <>
             <div className="vai-bubble-text">{phase.text}</div>
             <div className="vai-bubble-actions">
-              <button type="button" className="vai-bubble-btn" onClick={() => void copy(phase.text)}>
-                {copied ? <Check size={13} /> : <Copy size={13} />}
-                {copied ? 'Copied' : 'Copy'}
+              <button
+                type="button"
+                className="vai-bubble-btn vai-bubble-btn--primary"
+                onClick={() => void copy(phase.text)}
+              >
+                {copyState === 'copied' ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+                {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Retry copy' : 'Copy text'}
+              </button>
+              <button type="button" className="vai-bubble-btn" onClick={close}>
+                <X size={13} aria-hidden />
+                Close
               </button>
             </div>
           </>

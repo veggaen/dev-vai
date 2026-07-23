@@ -45,6 +45,7 @@ export type {
   ResponseReviewInput,
   ResponseReviewResult,
   ResponseReviewer,
+  CouncilWorkArtifactSummary,
 } from './chat/service.js';
 
 export {
@@ -122,6 +123,15 @@ export { evidenceTierFromProof } from './builder-loop/evidence-types.js';
 export { isFreshBuildRequestForEmptySandbox, routeBuilderRequest } from './models/builder/builder-request-router.js';
 export type { BuilderRequestRoute, BuilderRequestRouteInput, BuilderRequestRouteKind } from './models/builder/builder-request-router.js';
 export { evaluateBuilderPreviewQuality } from './models/builder/preview-quality.js';
+export { auditVisualLayout } from './models/builder/visual-layout-audit.js';
+export type {
+  VisualLayoutAuditOptions,
+  VisualLayoutAuditReport,
+  VisualLayoutIssue,
+  VisualLayoutNode,
+  VisualRect,
+  VisualSemanticTarget,
+} from './models/builder/visual-layout-audit.js';
 export type { BuilderPreviewQualityInput, BuilderPreviewQualityReport, BuilderPreviewQualityRequirement, BuilderPreviewQualityVerdict } from './models/builder/preview-quality.js';
 export { BRAND_BLUEPRINTS, councilGenerateApp, detectBrandBlueprint, extractAppFiles, validateGeneratedApp } from './models/builder/council-codegen/index.js';
 export type { BrandBlueprint } from './models/builder/council-codegen/index.js';
@@ -300,6 +310,30 @@ export type {
   ImageGenAttempt,
 } from './vision/index.js';
 export { tryEmitConversationReasoning } from './chat/conversation-reasoning.js';
+export {
+  buildDialogueSystemPrelude,
+  extractDialogueState,
+  reflectOnDialogue,
+  tryHandleDialogueTurn,
+} from './chat/dialogue-state.js';
+export type {
+  AttributedDialogueClaim,
+  DialogueEntityKind,
+  DialogueImprovementCandidate,
+  DialogueParticipant,
+  DialogueReflection,
+  DialogueRelationship,
+  DialogueState,
+  DialogueTurnResult,
+} from './chat/dialogue-state.js';
+export {
+  isVaiSelfAssessmentRequest,
+  tryEmitVaiSelfAssessment,
+} from './chat/vai-self-assessment.js';
+export type {
+  VaiOperationalEvidenceSnapshot,
+  VaiSelfAssessmentResult,
+} from './chat/vai-self-assessment.js';
 export {
   LIVE_CONTEXT_MAX_AGE_MS,
   getExplicitGrokFriendPrompt,
@@ -576,6 +610,18 @@ export {
   runSelfImprovement,
   quickHealth,
 } from './thorsen/index.js';
+
+export {
+  UNTRUSTED_CONTENT_POLICY,
+  UNTRUSTED_CONTENT_SURFACES,
+  prependUntrustedContentPolicy,
+  wrapUntrustedContent,
+} from './security/untrusted-content.js';
+export type { UntrustedContentSurface, WrappedUntrustedContent } from './security/untrusted-content.js';
+export { capabilityDenialMessage, decideToolCapabilities } from './security/capability-policy.js';
+export type { CapabilityDecision } from './security/capability-policy.js';
+export { budgetContext, estimateContextTokens } from './context/budget.js';
+export type { BudgetedContext, ContextCandidate } from './context/budget.js';
 export type {
   ThorsenAction,
   ThorsenDomain,

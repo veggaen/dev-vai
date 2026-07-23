@@ -221,7 +221,10 @@ const SCENARIOS: readonly OrchestratorScenario[] = [
     // Builder Mode 2.0: a generic scaffold that doesn't satisfy the request escalates
     // to the generative module instead of shipping boilerplate as "done".
     label: 'builder scaffold that misses the request escalates (Builder 2.0)',
-    prompt: 'Build a shared shopping list app with household members, grouped items, and an activity feed.',
+    // A builder-mode brief without an explicit execute-now verb still exercises
+    // the preliminary artifact gate. Explicit execution requests deliberately
+    // bypass this draft and go straight to the capable builder arm.
+    prompt: 'Shared shopping list app with household members, grouped items, and an activity feed.',
     mode: 'builder',
     vai: {
       text: '```json title="package.json"\n{"name":"my-app","type":"module","scripts":{"dev":"vite"}}\n```\n```tsx title="src/App.tsx"\nexport default function App() { return <div>Hello</div>; }\n```',
@@ -233,7 +236,9 @@ const SCENARIOS: readonly OrchestratorScenario[] = [
   {
     // Builder Mode 2.0 precision: a builder artifact that DOES satisfy the request is kept (no escalation).
     label: 'satisfying builder artifact is kept (no false escalation)',
-    prompt: 'Build a shared shopping list app with household members, grouped items, and an activity feed.',
+    // Keep this as a builder brief (not an execute-now command) so the
+    // preliminary-artifact satisfaction gate is the behavior under test.
+    prompt: 'Shared shopping list app with household members, grouped items, and an activity feed.',
     mode: 'builder',
     vai: {
       text: '```tsx title="src/App.tsx"\n// shared shopping list; household members add grouped items; activity feed shows changes\nexport default function App(){ return <ShoppingList household={members} activity={feed} items={grouped} />; }\n```',
@@ -341,7 +346,9 @@ describe('orchestrator-integrity audit lane', () => {
     expect(outcome.fallbackSystemText.length).toBeLessThan(2_000);
     expect(outcome.thinking?.intent).toBe('build');
     expect(outcome.thinking?.strategyChain).toEqual([
-      'fallback:builder-unsatisfied',
+      // Explicit execution requests skip the preliminary deterministic draft,
+      // so this is a direct capable-model handoff rather than a rejected draft.
+      'fallback:low-confidence',
       'escalate:mock:fallback',
       'verify:builder-satisfied',
     ]);

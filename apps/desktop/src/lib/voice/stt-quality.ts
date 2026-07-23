@@ -16,9 +16,13 @@ export function loadSttQuality(): SttQuality {
     const stored = localStorage.getItem(QUALITY_KEY);
     if (stored === 'fast' || stored === 'balanced' || stored === 'best') return stored;
   } catch { /* non-fatal */ }
-  // Fast by default: release-to-text in about a second (Wispr-Flow feel). The
-  // background polish pass still upgrades wording after the words have landed.
-  return 'fast';
+  // Balanced by default. 'fast' (base.en, 74M params) was measured at ~1s but
+  // mishears real-world speech — especially accented or fast speech — often
+  // enough that users stopped trusting dictation ("it gets me wrong a lot").
+  // distil-medium.en at ~4s warm is the accuracy/latency sweet spot; the words
+  // that land are the words that were said. Speed-first users can still pick
+  // 'fast' in Settings → Voice.
+  return 'balanced';
 }
 
 export function saveSttQuality(quality: SttQuality): void {

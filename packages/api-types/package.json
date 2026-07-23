@@ -1,5 +1,5 @@
 {
-  "name": "@vai/api-types",
+  "name": "@vai/contracts",
   "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",
@@ -18,14 +18,15 @@
     "./ide-ws": "./src/ide-ws.ts",
     "./responses": "./src/responses.ts",
     "./session-responses": "./src/session-responses.ts",
-    "./project-responses": "./src/project-responses.ts"
+    "./session-models": "./src/session-models.ts",
+    "./project-responses": "./src/project-responses.ts",
+    "./adoption": "./src/adoption.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@vai/core": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {

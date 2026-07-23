@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-23T11:22:36.9898857+02:00",
+  "status": "pass",
+  "totalTestsPassed": 5429,
+  "suites": [
+    {
+      "name": "full monorepo Vitest regression suite (thread pool, single worker)",
+      "testsPassed": 5429
+    }
+  ],
+  "typechecks": [
+    "@vai/desktop",
+    "@vai/extension",
+    "@vai/showcase",
+    "@vai/contracts",
+    "@vai/constants",
+    "@vai/core",
+    "@vai/runtime",
+    "@vai/ui"
+  ],
+  "checks": [
+    "corepack pnpm install --offline --frozen-lockfile",
+    "node node_modules/vitest/vitest.mjs run --pool=threads (329 files passed; 1 skipped; 5,429 tests passed; 48 skipped)",
+    "corepack pnpm -r --parallel typecheck",
+    "node scripts/run-hygiene.mjs",
+    "node scripts/check-platform-constants.mjs",
+    "corepack pnpm build"
+  ]
+}

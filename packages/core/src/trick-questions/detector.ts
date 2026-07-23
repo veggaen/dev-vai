@@ -32,7 +32,8 @@ export type TrickKind =
   | 'crossing-bridge'
   | 'implicit-constraint'
   | 'false-premise'
-  | 'anchoring-trap';
+  | 'anchoring-trap'
+  | 'calendar-inclusion';
 
 export interface TrickAnswer {
   kind: TrickKind;
@@ -358,9 +359,84 @@ export function detectAnchoringTrap(input: string): TrickAnswer | null {
   return null;
 }
 
+/**
+ * General paired-cost algebra, not a memorized bat-and-ball answer.
+ * If A + B = total and A = B + difference, solve B = (total-difference)/2.
+ */
+function parseMoneyExpression(value: string): number | null {
+  const normalized = value.trim().toLowerCase().replace(/,/g, '.');
+  const numeric = normalized.match(/^\$\s*([0-9]+(?:\.[0-9]{1,2})?)$/);
+  if (numeric) return Number(numeric[1]);
+
+  const dollarsAndCents = normalized.match(
+    /^([0-9]+)\s+dollars?(?:\s+and\s+([0-9]{1,2})\s+cents?)?$/,
+  );
+  if (dollarsAndCents) {
+    return Number(dollarsAndCents[1]) + Number(dollarsAndCents[2] ?? 0) / 100;
+  }
+
+  const centsOnly = normalized.match(/^([0-9]+)\s+cents?$/);
+  return centsOnly ? Number(centsOnly[1]) / 100 : null;
+}
+
+export function detectPairedCost(input: string): TrickAnswer | null {
+  const totalMatch = input.match(
+    /\b(?:(?:a|an|the)\s+)?([a-z][a-z -]{0,30}?)\s+and\s+(?:(?:a|an|the)\s+)?([a-z][a-z -]{0,30}?)\s+costs?\s+(\$\s*[0-9]+(?:[.,][0-9]{1,2})?|[0-9]+\s+dollars?(?:\s+and\s+[0-9]{1,2}\s+cents?)?|[0-9]+\s+cents?)\s+(?:total|together)\b/i,
+  );
+  const differenceMatch = input.match(
+    /\b(?:the\s+)?([a-z][a-z -]{0,30}?)\s+costs?\s+(\$\s*[0-9]+(?:[.,][0-9]{1,2})?|[0-9]+\s+dollars?(?:\s+and\s+[0-9]{1,2}\s+cents?)?|[0-9]+\s+cents?)\s+more\s+than\s+(?:the\s+)?([a-z][a-z -]{0,30}?)(?=[.?!]|\s+how\b|\s+what\b|$)/i,
+  );
+  if (!totalMatch || !differenceMatch) return null;
+
+  const normalizeName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+  const first = normalizeName(totalMatch[1]);
+  const second = normalizeName(totalMatch[2]);
+  const dearer = normalizeName(differenceMatch[1]);
+  const cheaper = normalizeName(differenceMatch[3]);
+  if (first !== dearer || second !== cheaper) return null;
+
+  const total = parseMoneyExpression(totalMatch[3]);
+  const difference = parseMoneyExpression(differenceMatch[2]);
+  if (total === null || difference === null) return null;
+  const cheapValue = (total - difference) / 2;
+  const dearValue = cheapValue + difference;
+  if (!Number.isFinite(cheapValue) || cheapValue < 0 || Math.abs((cheapValue + dearValue) - total) > 0.0001) return null;
+
+  const cents = Math.round(cheapValue * 100);
+  if (Math.abs(cents / 100 - cheapValue) > 0.0001) return null;
+  const money = (value: number) => `$${value.toFixed(2)}`;
+  return {
+    kind: 'anchoring-trap',
+    answer: `${cents} cents. The ${cheaper} is ${money(cheapValue)} and the ${dearer} is ${money(dearValue)}. Checks: ${money(dearValue)} + ${money(cheapValue)} = ${money(total)}, and ${money(dearValue)} - ${money(cheapValue)} = ${money(difference)}.`,
+    reasoning: `Solved x + (x + ${difference}) = ${total}; x = (${total} - ${difference}) / 2.`,
+    confidence: 0.99,
+  };
+}
+
+/** Interpret "months have N days" as containing an Nth day unless "exactly" is explicit. */
+export function detectCalendarInclusion(input: string): TrickAnswer | null {
+  const match = input.match(/\bhow\s+many\s+months\s+(?:have|contain)\s+(?:at\s+least\s+)?(\d{1,2})\s+days?\b/i);
+  if (!match || /\bexactly\b/i.test(input)) return null;
+  const day = Number(match[1]);
+  const counts: Record<number, number> = { 28: 12, 30: 11, 31: 7 };
+  const count = day <= 28 && day >= 1 ? 12 : counts[day];
+  if (!count) return null;
+  const reason = day <= 28
+    ? `Every month has at least ${day} days.`
+    : `${count} months have at least ${day} days.`;
+  return {
+    kind: 'calendar-inclusion',
+    answer: `${count}. ${reason}`,
+    reasoning: `The question asks whether the month contains day ${day}, not whether its total length is exactly ${day}.`,
+    confidence: 0.98,
+  };
+}
+
 // ─────────────────────────── Public dispatcher ────────────────────────────
 
 const ALL: ReadonlyArray<(input: string) => TrickAnswer | null> = [
+  detectPairedCost,
+  detectCalendarInclusion,
   detectLetterCount,
   detectEqualWeight,
   detectSisterBrother,

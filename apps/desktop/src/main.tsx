@@ -15,10 +15,14 @@ initOdysseusThemeFromStorage();
 
 // The standalone dictation bubble runs the same bundle in its own tiny window
 // (see Rust `ensure_dictation_bubble`) — route on the window's query string.
-const isBubbleWindow = new URLSearchParams(window.location.search).get('view') === 'dictation-bubble';
+const windowParams = new URLSearchParams(window.location.search);
+const isBubbleWindow = windowParams.get('view') === 'dictation-bubble';
 if (isBubbleWindow) {
   document.documentElement.dataset.view = 'dictation-bubble';
   document.body.dataset.view = 'dictation-bubble';
+  if (import.meta.env.DEV && windowParams.has('preview')) {
+    document.documentElement.dataset.preview = 'true';
+  }
 }
 
 // Popout panels ("Lego UI") run the same bundle in their own window too —
@@ -27,4 +31,6 @@ const popoutPanel = getPopoutPanelFromUrl();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isBubbleWindow ? <DictationBubble /> : popoutPanel ? <PopoutHost panel={popoutPanel} />
+    {isBubbleWindow ? <DictationBubble /> : popoutPanel ? <PopoutHost panel={popoutPanel} /> : <App />}
+  </StrictMode>,
+);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractFreshFact,
+  extractFreshFacts,
   extractFreshFactsForEntities,
   extractFreshFactSubjects,
   classifyFreshFactKind,
@@ -63,6 +64,22 @@ describe('extractFreshFact — price (the BTC failure case)', () => {
     // A price figure that is NOT about the subject (gold, not btc) should not be returned for btc.
     const wrongSubject = [src(0, 'The price of gold is $2,300 per ounce today.')];
     expect(extractFreshFact('what is the price of btc', wrongSubject, 'price')).toBeNull();
+  });
+
+  it('extracts several NOK/kr admission prices from a venue price table', () => {
+    const venue = [src(
+      0,
+      'Alpine skiing weekday from 395 kr.\nCross-country weekday from 145 kr.\nWeekend day pass from 495 NOK.',
+      'Prices and products | SNØ Oslo',
+      'https://snooslo.no/no/products',
+    )];
+
+    const facts = extractFreshFacts('prices for visiting SNØ Oslo', venue, 'price', { maxFacts: 6 });
+    expect(facts.map((fact) => fact.text)).toEqual(expect.arrayContaining([
+      expect.stringContaining('395 kr'),
+      expect.stringContaining('145 kr'),
+      expect.stringContaining('495 NOK'),
+    ]));
   });
 });
 

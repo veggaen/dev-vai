@@ -307,7 +307,7 @@ export function ProjectOversightPanel() {
         <div className="flex gap-1.5">
           <QuickNavButton icon={FileCode2} label="Files" active={showFileExplorer} onClick={focusFiles} />
           <QuickNavButton icon={GitPullRequest} label="Diffs" active={showDiffPanel} onClick={focusDiffs} />
-          <QuickNavButton icon={Monitor} label="Preview" active={showBuilderPanel} onClick={focusPreview} />
+          <QuickNavButton icon={Monitor} label="App" active={showBuilderPanel} onClick={focusPreview} />
           <QuickNavButton icon={Terminal} label="Console" active={showDebugConsole} onClick={focusConsole} />
         </div>
       </div>

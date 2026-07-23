@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BRAND_BLUEPRINTS } from '@vai/core';
-import type { ModelRegistry } from '@vai/core';
+import type { ModelRegistry, VaiOperationalEvidenceSnapshot } from '@vai/core';
 
 /**
  * Agent introspection — the machine-readable "way" for AI agents to understand
@@ -18,6 +18,8 @@ export interface AgentIntrospectDeps {
   readonly models: ModelRegistry;
   readonly fallbackChain: readonly string[];
   readonly repoRoot?: string;
+  /** Same bounded evidence packet supplied to Vai's zero-model self-assessment lane. */
+  readonly operationalEvidence?: () => VaiOperationalEvidenceSnapshot;
   /** Chat service for deliberation-trace parity (agents see what the UI shows). */
   readonly chatService?: {
     getConversation(id: string): unknown;
@@ -62,6 +64,12 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
     const repoRoot = deps.repoRoot ?? findVaiRepoRoot();
     const localIds = deps.models.listByProvider('local').map((adapter) => adapter.id);
     const councilOrder = [...new Set([...deps.fallbackChain.filter((id) => id !== 'vai:v0'), ...localIds])].slice(0, 3);
+    let operationalEvidence: VaiOperationalEvidenceSnapshot | null = null;
+    try {
+      operationalEvidence = deps.operationalEvidence?.() ?? null;
+    } catch {
+      // Introspection stays available if a bounded read fails unexpectedly.
+    }
 
     return {
       schemaVersion: 1,
@@ -77,6 +85,66 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
         qualityTier: adapter.qualityTier ?? null,
         speedTier: adapter.speedTier ?? null,
       })),
+      conversationIntelligence: {
+        owner: 'vai:v0',
+        stateSource: 'Persisted transcript, reconstructed deterministically on every turn',
+        pipeline: [
+          'identify current speaker and entity kind',
+          'preserve named relationships and attributed beliefs',
+          'carry values, shared goals, and we/us referents',
+          'answer relational recall before generic fallback',
+          'answer broad Vai self-assessment from explicit operational-evidence boundaries',
+          'reflect on the last completed exchange from measurable evidence',
+          'nominate proven gaps to the guarded self-improvement queue',
+        ],
+        modelPolicy: 'Relational turns are answered by Vai without Council. Optional model arms receive Vai-derived dialogue state; they do not infer or own attribution.',
+        safety: 'Reflection nominations cannot edit code directly and remain subject to review, tests, and verification.',
+        answerRevisionGate: {
+          owner: 'vai:v0',
+          policy: 'Council may propose a revision, but Vai compares it with the original before release.',
+          checks: [
+            'preserve release-critical prompt focus',
+            'preserve every already-covered multi-intent deliverable',
+            'reject material deterministic answer-quality regressions',
+            'keep the original draft when a revision fails integrity',
+          ],
+          visibility: 'Rejected revisions emit a progress step with the deterministic failure reason.',
+        },
+      },
+      boundedReasoning: {
+        owner: 'vai:v0',
+        policy: 'Parse a bounded input grammar into an inspectable intermediate representation, execute it, verify its invariants, return explicit ambiguity sets for non-unique results, and contain unsupported grammars instead of guessing.',
+        representations: [
+          'directed constraint graphs and critical paths',
+          'set inclusion/exclusion chains and minimum covers',
+          '2x2 controlled-interaction tables and intervention-based belief updates',
+          'Bayes, throughput, and recurrence equations',
+          'alias state, microtask/timer queues, spatial coordinates, and grouped aggregates',
+          'precedence stacks, evidence conflicts, untrusted-record counts, and destructive-action clarification',
+          'contrapositive chains, underdetermined systems, expected-value choices, and exact two-worker partitions',
+          'per-iteration closure bindings, confounding controls, constructive counterexamples, and corrected event ledgers',
+          'linear underdetermination witnesses, expected-cost objectives, count-posterior policy decisions, and Boolean consistency search',
+          'finite Boolean model search, quantified unary rules, abduction, CSP witnesses, graph coloring, and bijections',
+          'resource/release constrained planning, multi-budget routing, weighted set cover, and minimax regret tables',
+          'whitelisted MiniJS heap/closure/iterator/microtask semantics, causal SCMs, and transactional anomaly traces',
+          'event-sourced identity, alias chains, scoped settings, posterior policy composition, and explicit ambiguity sets',
+        ],
+        modelPolicy: 'Verified bounded answers are owned by Vai and bypass Council and response models. Recognized unsupported grammars are contained instead of being hijacked by unrelated high-confidence handlers.',
+        competition: {
+          suite: 'reasoning-spectrum-v4',
+          evaluationPolicy: 'Frozen pack/scorer fingerprints, fresh engine per scenario, shuffled-order determinism, semantic witness checks, attack-bank controls, and first-exposure results kept separate from retired-pack regression.',
+          baseFingerprint: '41a4c549d261972e117be3b2f5a09e38182676970652212455ebf0e003bcadaf',
+          fresh1Fingerprint: '009cc02f5f8dc8e9c8a7168cd17f8a79fc474f61acef2d4dfa1c3c74e6f4dd76',
+          fresh2Fingerprint: '6f27de0f9336597695643cd2968880d4e741d891493fdabfac3af1891ff8c98a',
+          fresh3Fingerprint: '6c69fd30eaf209eed7e002bbe7954b5228ca90dfc46a88dd4095813d232c9b4f',
+          v3SoundnessFingerprint: 'f7ef13d374be24d9715dba3355b714c7be75c2549620b93363a4d164affb4314',
+          v3FrontierFingerprint: '6e2620a5719304fe6f649715e4e33dafa51c33eb829eb959983a5344f077688e',
+          v3FreshFingerprint: '3aa253b73d5fc2b04e5a51beadf3cfc648c83b4bd2d5ff6b86028b164c7c4834',
+          v4SealedFingerprint: '714abf15e1b457c63a6a10bd40b6fd7b0de0d67f35269a5145158bc342d20786',
+          v4Wave2Fingerprint: 'e8e727cd37c1091e1252a8ab78a43cd8f7894a5177aed32957e54128df5cbaaa',
+        },
+      },
+      operationalEvidence,
       builderCouncil: {
         memberOrder: councilOrder,
         roles: { architectAndCoderAndStylist: councilOrder[0] ?? null, reviewers: councilOrder.slice(1) },
@@ -106,6 +174,8 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
       agentTooling: readJsonDoc(repoRoot, path.join('docs', 'agent-tooling-guide.json')),
       keyPaths: {
         chatPolicy: 'packages/core/src/chat/service.ts',
+        dialogueState: 'packages/core/src/chat/dialogue-state.ts',
+        selfAssessment: 'packages/core/src/chat/vai-self-assessment.ts',
         engine: 'packages/core/src/models/vai-engine.ts',
         councilCodegen: 'packages/core/src/models/builder/council-codegen/',
         sandbox: 'packages/runtime/src/sandbox/',

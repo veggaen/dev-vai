@@ -17,7 +17,7 @@ import { InfoBlock } from './chat/InfoBlock.js';
 import {
   Copy, Check, FileText, Rocket, HelpCircle, X as XIcon,
   ChevronRight, CornerDownRight, User, ThumbsUp, ThumbsDown,
-  Wrench, Sparkles, BookOpen, ExternalLink,
+  Wrench, Sparkles, BookOpen, ExternalLink, Pencil, RefreshCw,
 } from 'lucide-react';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
@@ -134,6 +134,26 @@ interface MessageBubbleProps {
   followUpsHandledBySidebar?: boolean;
   /** Light “studio builder” message chrome (pairs with chat + preview split) */
   studioChrome?: boolean;
+  /** ISO timestamp for when this message was created (persisted or optimistic). */
+  createdAt?: string;
+  /** Called with the raw message text when the user wants to edit it in the composer. */
+  onEdit?: (content: string) => void;
+  /** Re-runs the latest turn (shown only on the newest assistant message). */
+  onRetry?: () => void;
+}
+
+/** "14:32" for today, "Jul 12 · 14:32" otherwise; full locale string for the tooltip. */
+function formatMessageTime(iso: string): { short: string; full: string } | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const sameDay = date.toDateString() === now.toDateString();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const short = sameDay
+    ? time
+    : `${date.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' })} · ${time}`;
+  return { short, full: date.toLocaleString() };
 }
 
 const INLINE_TOKEN_REGEX = /(\[[^\]]+\]\([^)]+\)|\[\d+\]|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
@@ -690,8 +710,12 @@ export function MessageBubble({
   onOpenSources,
   followUpsHandledBySidebar = false,
   studioChrome = false,
+  createdAt,
+  onEdit,
+  onRetry,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
+  const messageTime = createdAt ? formatMessageTime(createdAt) : null;
   const isProjectUpdate = !isUser && isProjectUpdateMessage(content);
   const [copied, setCopied] = useState(false);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
@@ -725,7 +749,7 @@ export function MessageBubble({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [artifactFreeContent, isProjectUpdate]);
+  }, [artifactFreeContent, isProjectUpdate, isUser]);
 
   const deployActions = extractDeployActions(content);
   const templateActions = extractTemplateActions(content);
@@ -985,6 +1009,15 @@ export function MessageBubble({
             )}
             {!isUser && !sender?.model && respondingModelId && (
               <span className={`text-[10px] font-normal ${studioChrome ? 'text-zinc-400' : 'text-zinc-700'}`}>· {respondingModelId}</span>
+            )}
+            {messageTime && (
+              <span
+                className={`text-[10px] font-normal tabular-nums opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 ${studioChrome ? 'text-zinc-400' : 'text-zinc-600'}`}
+                title={messageTime.full}
+                data-message-time={createdAt}
+              >
+                · {messageTime.short}
+              </span>
             )}
             {showHeaderConfidence && (
               <span
@@ -1348,4 +1381,132 @@ export function MessageBubble({
             {showNudge && fallbackDeploy && (
               <div className="mt-3 border-t border-zinc-700/20 pt-3">
                 <div className="flex items-start gap-2">
-               
+                  <CornerDownRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400/70" />
+                  <div className="flex-1">
+                    <p className="text-xs text-zinc-400">
+                      Create a runnable <span className="font-semibold text-zinc-200">{fallbackDeploy.displayName}</span> baseline now?
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => handleDeploy({ stackId: fallbackDeploy.stackId, tier: fallbackDeploy.tier, name: fallbackDeploy.displayName })}
+                        className="flex items-center gap-1.5 rounded-lg bg-violet-600/80 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-violet-500"
+                      >
+                        <Rocket className="h-3 w-3" />
+                        Create baseline
+                      </button>
+                      <button onClick={handleNudgeDismiss} className="rounded-lg border border-zinc-700/50 px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:border-zinc-600 hover:text-zinc-300">
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Clarify Picker */}
+            {showClarify && allIntents && (
+              <div className="mt-3 border-t border-zinc-700/20 pt-3">
+                <div className="flex items-start gap-2">
+                  <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <div className="flex-1">
+                    <p className="mb-2 text-xs text-zinc-500">Which stack would you like?</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {allIntents.slice(0, 4).map((intent, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleDeploy({ stackId: intent.stackId, tier: intent.tier, name: intent.displayName })}
+                          className="flex items-center gap-1.5 rounded-lg border border-zinc-700/40 bg-zinc-800/40 px-2.5 py-2 text-left text-xs text-zinc-300 transition-all hover:border-zinc-500/50 hover:bg-zinc-800/80"
+                        >
+                          <Rocket className="h-3 w-3 shrink-0 text-zinc-600" />
+                          <span className="font-medium">{intent.displayName}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={handleClarifyDismiss} className="mt-2 flex items-center gap-1 text-[10px] text-zinc-700 transition-colors hover:text-zinc-400">
+                      <XIcon className="h-2.5 w-2.5" />
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── User message actions (below the pill, right-aligned, hover-reveal) ── */}
+          {isUser && content.length > 0 && (
+            <div className="mt-1.5 flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
+              <button
+                onClick={handleCopyAll}
+                className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-400"
+                title="Copy message"
+              >
+                {copied
+                  ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</>
+                  : <><Copy className="h-3 w-3" /> Copy</>
+                }
+              </button>
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(content)}
+                  data-message-action="edit"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-400"
+                  title="Edit in composer and resend"
+                >
+                  <Pencil className="h-3 w-3" /> Edit
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Action buttons row (below the message) ── */}
+          {!isUser && content.length > 0 && !isStreaming && (
+            <div className={`mt-3 flex items-center gap-0.5 pt-1 transition-opacity duration-200 ${actionVisibility}`}>
+              <button
+                onClick={handleCopyAll}
+                className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-400"
+                title="Copy response"
+              >
+                {copied
+                  ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</>
+                  : <><Copy className="h-3 w-3" /> Copy</>
+                }
+              </button>
+              {onRetry && isLatest && (
+                <button
+                  onClick={onRetry}
+                  data-message-action="retry"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-400"
+                  title="Run this turn again"
+                >
+                  <RefreshCw className="h-3 w-3" /> Retry
+                </button>
+              )}
+              <button
+                onClick={() => onFeedback?.(true)}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
+                  feedback === true
+                    ? 'bg-emerald-500/10 text-emerald-400'
+                    : 'text-zinc-600 hover:bg-white/[0.04] hover:text-zinc-400'
+                }`}
+                title="Helpful"
+              >
+                <ThumbsUp className="h-3 w-3" />
+              </button>
+              <button
+                onClick={() => onFeedback?.(false)}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
+                  feedback === false
+                    ? 'bg-red-500/10 text-red-400'
+                    : 'text-zinc-600 hover:bg-white/[0.04] hover:text-zinc-400'
+                }`}
+                title="Not helpful"
+              >
+                <ThumbsDown className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

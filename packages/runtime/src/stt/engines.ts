@@ -268,21 +268,32 @@ async function loadBuiltinPipeline(model: string, signal: AbortSignal): Promise<
 }
 
 let warmupStarted = false;
+const FAST_PTT_BUILTIN_MODEL = 'onnx-community/whisper-base.en';
+
+export function builtinWarmupModels(configuredModel: string): string[] {
+  const model = configuredModel.trim() || 'distil-whisper/distil-medium.en';
+  return model === FAST_PTT_BUILTIN_MODEL
+    ? [FAST_PTT_BUILTIN_MODEL]
+    : [FAST_PTT_BUILTIN_MODEL, model];
+}
 
 /**
- * Pre-load the model the desktop client actually requests by default
- * (balanced tier) so the FIRST dictation answers in seconds. Fire-and-forget;
- * failures are silent and retried on demand. Opt out with VAI_STT_WARMUP=0.
+ * Pre-load the latency-critical global-PTT model first, then the desktop's
+ * ordinary balanced model. Fire-and-forget; failures are silent and retried on
+ * demand. Opt out with VAI_STT_WARMUP=0.
  */
 export function warmBuiltinWhisper(delayMs = 3_000): void {
   if (warmupStarted || process.env.VAI_STT_WARMUP === '0') return;
   warmupStarted = true;
   const model = process.env.VAI_STT_BUILTIN_MODEL?.trim() || 'distil-whisper/distil-medium.en';
   const timer = setTimeout(() => {
-    // Warm BOTH tiers the desktop uses per dictation: the balanced release model
-    // and the fast live-preview model — so the first hold answers instantly.
-    loadBuiltinPipeline(model, new AbortController().signal)
-      .then(() => loadBuiltinPipeline('onnx-community/whisper-base.en', new AbortController().signal))
+    // Warm the fast game-PTT tier first, then the ordinary balanced tier.
+    // Sequential loading avoids simultaneous GPU and disk pressure.
+    const [fastModel, balancedModel] = builtinWarmupModels(model);
+    loadBuiltinPipeline(fastModel!, new AbortController().signal)
+      .then(() => balancedModel
+        ? loadBuiltinPipeline(balancedModel, new AbortController().signal)
+        : undefined)
       .catch(() => undefined);
   }, delayMs);
   timer.unref?.();
@@ -454,6 +465,22 @@ export function looksLikeGarbageTranscript(text: string, audioSeconds: number): 
   return words.length >= 12 && repeats / words.length > 0.2;
 }
 
+/**
+ * True when a transcript from a small/fast model deserves a second opinion from
+ * the top-tier model. Two triggers:
+ *   1. ASR syllable-debris artifacts (existing detector), and
+ *   2. implausible sparsity — the client trims silence before upload, so ≥3s of
+ *      kept audio yielding under ~0.5 words/sec means the small model dropped
+ *      words rather than the user pausing.
+ */
+export function transcriptDeservesEscalation(text: string, audioSeconds: number): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (looksLikeAsrArtifactTranscript(trimmed)) return true;
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  return audioSeconds >= 3 && words / audioSeconds < 0.5;
+}
+
 async function decodeOnce(
   transcriber: XenovaPipeline,
   pcm: Float32Array,
@@ -515,7 +542,7 @@ async function transcribeBuiltinPcm(
   }
   if (
     text
-    && looksLikeAsrArtifactTranscript(text)
+    && transcriptDeservesEscalation(text, audioSeconds)
     && !/large-v3-turbo/i.test(modelId)
     && !signal.aborted
   ) {
@@ -543,18 +570,34 @@ async function recreatePipelineOnCpu(model: string, signal: AbortSignal): Promis
   return loadBuiltinPipeline(model, signal);
 }
 
+/**
+ * Whisper-style decode prompt from the user's custom vocabulary. Listing the
+ * exact spellings in the prompt biases OpenAI-compatible engines toward them
+ * ("League of Legends" instead of "allegiance") — decode-time biasing, which
+ * beats post-hoc correction. The builtin transformers.js path can't take a
+ * prompt (prompt_ids is unimplemented there), so it keeps the cleanup-layer
+ * restoration instead.
+ */
+function vocabularyPrompt(vocabulary: readonly string[] | undefined): string | null {
+  if (!vocabulary?.length) return null;
+  return `Glossary: ${vocabulary.slice(0, 60).join(', ')}.`;
+}
+
 async function transcribeOllamaBuffer(
   audio: Buffer,
   mimeType: string,
   language: string | undefined,
   model: string,
   signal: AbortSignal,
+  vocabulary?: readonly string[],
 ): Promise<string> {
   const ext = audioExtension(mimeType);
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType }), `dictation.${ext}`);
   form.append('model', model);
   if (language) form.append('language', language.split('-')[0]);
+  const prompt = vocabularyPrompt(vocabulary);
+  if (prompt) form.append('prompt', prompt);
 
   const headers = { Authorization: 'Bearer ollama' };
   const endpoints = ['/v1/audio/transcriptions', '/api/transcribe'];
@@ -590,12 +633,15 @@ async function transcribeCloudBuffer(
   language: string | undefined,
   apiKey: string,
   signal: AbortSignal,
+  vocabulary?: readonly string[],
 ): Promise<string> {
   const form = new FormData();
   const ext = audioExtension(mimeType);
   form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType }), `dictation.${ext}`);
   form.append('model', process.env.VAI_STT_MODEL?.trim() || DEFAULT_CLOUD_MODEL);
   if (language) form.append('language', language.split('-')[0]);
+  const prompt = vocabularyPrompt(vocabulary);
+  if (prompt) form.append('prompt', prompt);
 
   const response = await fetch(OPENAI_AUDIO_URL, {
     method: 'POST',
@@ -623,6 +669,7 @@ export async function transcribeAudio(
   choice: SttEngineChoice,
   apiKey: string | null,
   signal: AbortSignal,
+  vocabulary?: readonly string[],
 ): Promise<string> {
   if (choice.source === 'builtin') {
     // Whisper emits "[BLANK_AUDIO]"/"[Music]" style annotations for silence and
@@ -634,12 +681,12 @@ export async function transcribeAudio(
     if (isPcmMime(mimeType)) {
       const pcm = new Float32Array(audio.buffer, audio.byteOffset, audio.byteLength / 4);
       const wav = encodePcm16Wav(pcm, pcmSampleRate(mimeType));
-      return transcribeOllamaBuffer(wav, 'audio/wav', language, choice.ollamaModel, signal);
+      return transcribeOllamaBuffer(wav, 'audio/wav', language, choice.ollamaModel, signal, vocabulary);
     }
-    return transcribeOllamaBuffer(audio, mimeType, language, choice.ollamaModel, signal);
+    return transcribeOllamaBuffer(audio, mimeType, language, choice.ollamaModel, signal, vocabulary);
   }
   if (choice.source === 'cloud' && apiKey) {
-    return transcribeCloudBuffer(audio, mimeType, language, apiKey, signal);
+    return transcribeCloudBuffer(audio, mimeType, language, apiKey, signal, vocabulary);
   }
   throw new Error('No speech engine is available for this request.');
 }

@@ -11,6 +11,7 @@
  */
 
 import { isConversationMode } from '../chat/modes.js';
+import { PERSISTED_NAMES, PORTS } from '@vai/constants';
 import type { VaiConfig, ProviderConfig, ProviderId, PlatformAuthConfig, PlatformAuthProviderId, ChatPromptRewriteConfig, FallbackChain } from './types.js';
 
 export type { VaiConfig, ProviderConfig, ProviderId, ModelProfile, ModelCapabilities, ModelCost, RoutingRule, FallbackChain, PlatformAuthConfig, PlatformAuthProviderId, PlatformAuthProviderConfig, GoogleOAuthConfig, WorkOSAuthConfig, ChatPromptRewriteConfig, ChatPromptRewriteProfile, ChatPromptRewriteResponseDepth, ChatPromptRewriteRulesConfig } from './types.js';
@@ -185,7 +186,7 @@ function buildVerificationConfig(env: NodeJS.ProcessEnv): FallbackChain['verific
 }
 
 function buildPlatformAuthConfig(env: NodeJS.ProcessEnv): PlatformAuthConfig {
-  const port = envInt(env, 'VAI_PORT', 3006);
+  const port = envInt(env, 'VAI_PORT', PORTS.runtime);
   const publicUrl = envStr(env, 'VAI_PUBLIC_URL', `http://localhost:${port}`);
   const appUrl = env.VAI_APP_URL?.trim() || undefined;
   const googleClientId = firstEnv(env, ['GOOGLE_WEB_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_ID']);
@@ -274,8 +275,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
 
   return {
     // Server
-    port: envInt(env, 'VAI_PORT', 3006),
-    dbPath: envStr(env, 'VAI_DB_PATH', './vai.db'),
+    port: envInt(env, 'VAI_PORT', PORTS.runtime),
+    dbPath: envStr(env, 'VAI_DB_PATH', `./${PERSISTED_NAMES.database}`),
     dbDriver: envStr(env, 'VAI_DB_DRIVER', 'sqlite') as 'sqlite' | 'postgres',
     databaseUrl: env.DATABASE_URL?.trim(),
 

@@ -1,4 +1,4 @@
-import type { ConversationSummary } from '@vai/api-types/responses';
+import type { ConversationSummary } from '@vai/contracts/responses';
 
 /**
  * Pick the conversation that most recently worked on a sandbox project.

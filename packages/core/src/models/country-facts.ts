@@ -50,10 +50,13 @@ export function normalizeCountryKey(raw: string): string {
 export function lookupCountryKeyFromCapitalPrompt(body: string): string | null {
   const match = body.match(/\bcapital\s+(?:city\s+)?of\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i)
     ?? body.match(/\bwhat\s+is\s+the\s+capital\s+of\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i)
-    ?? body.match(/\bcapital\s+of\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i);
+    ?? body.match(/\bcapital\s+of\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i)
+    ?? body.match(/\bcapital\s+belonging\s+to\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i)
+    ?? body.match(/\b([a-z][a-z\s]{1,30}?)(?:'s|’s)\s+capital\b/i);
   if (!match) return null;
   const key = normalizeCountryKey(match[1]);
-  return COUNTRY_FACTS[key] ? key : null;
+  if (COUNTRY_FACTS[key]) return key;
+  return countryKeysInText(match[1]).at(-1) ?? null;
 }
 
 export function lookupCountryKeyFromCurrencyPrompt(body: string): string | null {
@@ -103,7 +106,7 @@ export function formatCapitalCurrencySlash(key: string): string | null {
 /** One-word capital when the prompt demands terse output (eval: one-word-capital). */
 export function formatOneWordCapitalFromBody(body: string): string | null {
   const lower = body.toLowerCase();
-  if (!/\b(?:one\s+word\s+only|one\s+word|word\s+only|in\s+exactly\s+one\s+word|exactly\s+one\s+word)\b/i.test(lower)) {
+  if (!/\b(?:one\s+word\s+only|one\s+word|word\s+only|single\s+word|in\s+exactly\s+one\s+word|exactly\s+one\s+word|nothing\s+else)\b/i.test(lower)) {
     return null;
   }
   const key = lookupCountryKeyFromCapitalPrompt(body)
@@ -112,4 +115,44 @@ export function formatOneWordCapitalFromBody(body: string): string | null {
   const fact = COUNTRY_FACTS[key];
   if (!fact || /\s/.test(fact.capital)) return null;
   return fact.capital;
+}
+
+function countryKeysInText(value: string): string[] {
+  const matches: Array<{ key: string; index: number }> = [];
+  for (const key of Object.keys(COUNTRY_FACTS).sort((a, b) => b.length - a.length)) {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`\\b${escaped}\\b`, 'i').exec(value);
+    if (match) matches.push({ key, index: match.index });
+  }
+  return matches.sort((a, b) => a.index - b.index).map((match) => match.key);
+}
+
+/**
+ * Resolve a spoken correction across a two-fact request.
+ *
+ * Example: "capital of France and currency of Japan; wait, swap France for
+ * Germany". The correction is applied before formatting, so an early
+ * canonical-fact lookup cannot leak the superseded country.
+ */
+export function formatCorrectedCapitalCurrencyFromBody(body: string): string | null {
+  if (!/\bcapital\b/i.test(body) || !/\bcurrency\b/i.test(body)) return null;
+  const correction = /\b(?:wait|actually|change|replace|swap)\b/i.exec(body);
+  if (!correction) return null;
+
+  const before = body.slice(0, correction.index);
+  const after = body.slice(correction.index);
+  const capitalSegment = before.match(/\bcapital\b[\s\S]*?(?=\bcurrency\b|$)/i)?.[0] ?? before;
+  const currencySegment = before.match(/\bcurrency\b[\s\S]*$/i)?.[0] ?? before;
+  const initialCapital = countryKeysInText(capitalSegment)[0] ?? countryKeysInText(before)[0];
+  const currency = countryKeysInText(currencySegment)[0];
+  const correctionCountries = countryKeysInText(after);
+  const correctedCapital = correctionCountries.length >= 2
+    ? correctionCountries.at(-1)!
+    : correctionCountries[0];
+  if (!initialCapital || !currency || !correctedCapital || correctedCapital === initialCapital) return null;
+
+  const capitalFact = COUNTRY_FACTS[correctedCapital];
+  const currencyFact = COUNTRY_FACTS[currency];
+  if (!capitalFact || !currencyFact) return null;
+  return `Capital: ${capitalFact.capital}\nCurrency: ${currencyFact.code}`;
 }

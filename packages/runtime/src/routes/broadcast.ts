@@ -6,7 +6,7 @@ import {
   companionChatInfoBodySchema,
   companionModelsBodySchema,
   createBroadcastBodySchema,
-} from '@vai/api-types/broadcast';
+} from '@vai/contracts/broadcast';
 import { invalidRequestBody } from '../validation/http-validation.js';
 import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 

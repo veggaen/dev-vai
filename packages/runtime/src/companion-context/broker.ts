@@ -3,7 +3,7 @@ import type {
   CompanionContextEvidence,
   CompanionContextField,
   CompanionContextWorkItem,
-} from '@vai/api-types/companion-context';
+} from '@vai/contracts/companion-context';
 
 interface PendingContextRequest {
   requestId: string;

@@ -1,5 +1,6 @@
 import type { BrandBlueprint } from './brand-blueprints.js';
 import type { CouncilAppSpec, CouncilCodegenMessage, CouncilEditContext } from './types.js';
+import { wrapUntrustedContent } from '../../../security/untrusted-content.js';
 
 /**
  * Prompt builders for the council codegen pipeline. Kept small and literal:
@@ -23,12 +24,25 @@ const APP_CONTRACT = [
   '- Guard EVERY indexed access: `items[index]` can be undefined after the user advances past the end — check it (`const current = items[index]; if (!current) return <EmptyState/>;`) and render an explicit finished/empty state. A runtime crash on the last card is the #1 failure of this app class.',
   '- Use semantic HTML with accessible labels (aria-label on icon-only buttons, <label> on inputs).',
   '- TypeScript strict mode must pass: type the state, no `any`, no unused variables. Type record objects you index by string (e.g. `Record<string, number>`).',
+  '- Do not annotate component returns with the global `JSX.Element` namespace; let TypeScript infer the return type (or use an imported React type when inference is impossible).',
   '- className discipline: use ONLY semantic kebab-case class names you invent (card-stack, action-row, like-button, match-overlay). A separate stylist will write CSS for EXACTLY the class names you use, so every visual element needs a meaningful class. NEVER use Tailwind/utility names (flex, p-4, bg-gray-900, absolute inset-0…) — they do not exist here and render as unstyled text.',
 ].join('\n');
 
 const CLONE_FIDELITY_RULE = 'If the brief references a known product (Tinder, Twitter/X, Instagram, Spotify, Trello, Airbnb, …), mirror that product\'s signature experience and layout — e.g. Tinder → a swipeable profile-card deck with photo area, name+age, like/pass buttons and a match list; Trello → drag-style columns with cards. A generic dashboard or form is wrong for a clone request.';
 
 const NO_EXTERNAL_ASSETS_RULE = 'All visuals must be self-contained: CSS gradients, inline SVG, or initials-on-gradient avatars. NEVER reference external URLs (no randomuser.me, no unsplash, no placekitten, no http(s) images) — the sandbox is offline and they render as broken images.';
+
+const RELATIONAL_VISUAL_RULES = [
+  '- RELATIONAL SPACING: opaque/rounded panels are autonomous surfaces. Unless intentionally joined, separate aligned surfaces using the page\'s established spacing rhythm; two independently rounded panels touching at 0px is a failure even when their internal padding is valid.',
+  '- MEDIA FIT: inline SVG, images, charts, and canvases must fit their containers at desktop, tablet, and mobile without accidental clipping or hidden overflow.',
+  '- SEMANTIC ART: distinct requested visuals need genuinely different geometry and palettes. Repeating the same line/path/rectangle/template does not satisfy meaning merely because the tag count passes.',
+] as const;
+
+function relationalVisualEditRules(brief: string): readonly string[] {
+  return /\b(?:ui|ux|visual|design|style|css|layout|spacing|gap|margin|padding|surface|panel|card|image|svg|cover|background|hero|responsive|mobile|clipping|overflow)\b/i.test(brief)
+    ? RELATIONAL_VISUAL_RULES
+    : [];
+}
 
 function renderBlueprint(blueprint: BrandBlueprint): string {
   return [
@@ -87,7 +101,11 @@ function renderEditFiles(edit: CouncilEditContext): string {
   return edit.files.map((file) => [
     `${file.readonly ? 'READ-ONLY REFERENCE' : 'EDITABLE FILE'}: ${file.path}`,
     '```',
-    file.content,
+    wrapUntrustedContent(
+      /(?:^|\/)(?:readme|docs?\/)|\.(?:md|mdx)$/i.test(file.path) ? 'docs-comments' : 'repo-file',
+      file.content,
+      { source: file.path },
+    ),
     '```',
   ].join('\n')).join('\n\n');
 }
@@ -125,7 +143,9 @@ export function buildEditMessages(brief: string, edit: CouncilEditContext): read
         : '- You may only touch the project files shown below. If the request cannot be satisfied with those files, output the single line CANNOT-EDIT: <reason> instead of guessing.',
       '- Files marked READ-ONLY REFERENCE may inform imports, APIs, tests, and parameters, but must never be emitted or modified.',
       ...hardhat3EditRules(brief),
+      ...relationalVisualEditRules(brief),
       '- The emitted file must be syntactically complete and valid — never truncate.',
+      '- In React TSX, do not use the global `JSX.Element` namespace for component return annotations; prefer inferred returns so the project\'s JSX runtime/types remain authoritative.',
       '- PRESERVE FEATURES: never remove functions, props, exports, handlers, or UI elements the request did not ask you to remove. If something looks broken or unused, improve it — removal is a last resort the user must ask for.',
     ]
     : [
@@ -141,6 +161,8 @@ export function buildEditMessages(brief: string, edit: CouncilEditContext): read
       '',
       '- You may only touch the project source files shown below (typically src/App.tsx and src/styles.css). Do not emit package.json, index.html, main.tsx, or tsconfig.json.',
       "- Import ONLY from 'react'. TypeScript strict mode must pass.",
+      ...relationalVisualEditRules(brief),
+      '- Do not use the global `JSX.Element` namespace for component return annotations; prefer inferred returns.',
       '- Plain CSS only; style every class you use; keep the existing design language unless the request says otherwise; interactive elements keep :hover/:focus states.',
       '- If the change is purely visual (colors, background, typography), prefer changing ONLY src/styles.css.',
       '- PRESERVE FEATURES: never remove existing functionality, sections, or interactions the request did not ask you to remove — improve them instead.',
@@ -183,7 +205,7 @@ export function buildEditRepairMessages(
         renderEditFiles(edit),
         '',
         'YOUR PREVIOUS (REJECTED) EDIT:',
-        previousOutput.slice(0, 9000),
+        previousOutput.slice(0, 14_000),
       ].join('\n'),
     },
   ];
@@ -278,4 +300,61 @@ export function buildStylistMessages(
     {
       role: 'system',
       content: [
-        `You are the stylist on a small product council. src/App.tsx is FINAL (shown below for structure). Wri
+        `You are the stylist on a small product council. src/App.tsx is FINAL (shown below for structure). Write the complete stylesheet for it.`,
+        'Output EXACTLY one fenced code block and nothing else:',
+        '',
+        '```css title="src/styles.css"',
+        '...the complete stylesheet...',
+        '```',
+        '',
+        'Hard rules:',
+        '- Write a CSS rule for EVERY class in the CLASS LIST below — no class may be left unstyled, and do not invent rules for classes that are not in the list (plus body/element selectors as needed).',
+        '- Plain CSS only: no Tailwind, no @import, no external URLs (offline sandbox).',
+        '- Start with `*, *::before, *::after { box-sizing: border-box; }` so padded controls cannot overflow their containers.',
+        ...RELATIONAL_VISUAL_RULES,
+        '- A deliberate visual direction: styled page background, a set font-family, cohesive palette, consistent spacing, rounded corners and shadows where they fit.',
+        '- :hover and :focus-visible states on every interactive class (buttons, cards, tabs, chips).',
+        '- Responsive: include an @media rule for narrow screens that stacks wide rows, wraps controls, and prevents horizontal page overflow.',
+        ...(blueprint ? [`Visual identity to reproduce: ${blueprint.visual}`] : []),
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `App: ${spec.title} — ${spec.summary}`,
+        '',
+        `CLASS LIST (style every one): ${classNames.join(', ')}`,
+        '',
+        'src/App.tsx (final, for structure):',
+        structure,
+      ].join('\n'),
+    },
+  ];
+}
+
+export function buildStylistRepairMessages(
+  spec: CouncilAppSpec,
+  classNames: readonly string[],
+  previousCss: string,
+  issues: readonly string[],
+  blueprint?: BrandBlueprint | null,
+): readonly CouncilCodegenMessage[] {
+  return [
+    buildStylistMessages(spec, classNames, '', blueprint)[0],
+    {
+      role: 'user',
+      content: [
+        `App: ${spec.title}`,
+        `CLASS LIST (style every one): ${classNames.join(', ')}`,
+        '',
+        'Your previous stylesheet had blocking problems. Fix every issue and re-emit the COMPLETE stylesheet:',
+        ...issues.map((issue, i) => `${i + 1}. ${issue}`),
+        '',
+        'Previous src/styles.css:',
+        '```css',
+        previousCss,
+        '```',
+      ].join('\n'),
+    },
+  ];
+}

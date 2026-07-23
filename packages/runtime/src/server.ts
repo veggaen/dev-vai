@@ -2,6 +2,8 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import path from 'node:path';
+import { PERSISTED_NAMES, VITE_PROXIED_PORTS } from '@vai/constants';
+import { CapabilityGrantService } from './security/capability-grants.js';
 import {
   createDb,
   ModelRegistry,
@@ -45,7 +47,8 @@ import { registerIdeRoutes } from './routes/ide.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerSteeringRoutes } from './routes/steering.js';
-import { registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
+import { findVaiRepoRoot, registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
+import { createVaiOperationalEvidenceProvider } from './operational-evidence.js';
 import { registerCouncilChangelogRoutes } from './routes/council-changelog.js';
 import { registerKnowledgeGraphRoutes } from './routes/knowledge-graph.js';
 import { registerMemoryRoutes } from './routes/memory.js';
@@ -71,6 +74,25 @@ import { CompanionContextBroker } from './companion-context/broker.js';
 import { GrokFriendClient } from './grok-friend/client.js';
 import { WorkspaceStatusReader } from './workspace-status/reader.js';
 import { createRuntimeAdaptiveDomains } from './adaptive-domains.js';
+import { createDefaultAgentProviderRegistry } from './agents/provider-adapter.js';
+import { AgentProcessManager } from './agents/process-manager.js';
+import { WorktreeManager } from './agents/worktree-manager.js';
+import { registerAgentSessionRoutes } from './routes/agent-sessions.js';
+import { JsonStore } from './persistence/json-store.js';
+import { BlindCompareService, PersonaService } from './personas/service.js';
+import { registerPersonaRoutes } from './routes/personas.js';
+import { SkillConfidenceService } from './skills/confidence-service.js';
+import { registerLearnedSkillRoutes } from './routes/learned-skills.js';
+import { EnvironmentService } from './environments/service.js';
+import { registerEnvironmentRoutes } from './routes/environments.js';
+import { SshLauncher } from './environments/ssh-launcher.js';
+import { registerSshLaunchRoutes } from './routes/ssh-launch.js';
+import { ShareService } from './sharing/service.js';
+import { LinkIndexService } from './links/service.js';
+import { registerAdoptionDataRoutes } from './routes/adoption-data.js';
+import { DetailedHealthService } from './health/service.js';
+import { HardwareModelService } from './health/hardware.js';
+import { registerDetailedHealthRoutes } from './routes/health-detail.js';
 
 export interface ServerOptions {
   port?: number;
@@ -86,13 +108,13 @@ export function getDefaultAllowedOrigins(port: number): string[] {
   ];
 
   return Array.from(new Set([
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://0.0.0.0:5173',
-    'http://[::1]:5173',
+    ...VITE_PROXIED_PORTS.flatMap((vitePort) => [
+      `http://localhost:${vitePort}`,
+      `http://127.0.0.1:${vitePort}`,
+      `http://0.0.0.0:${vitePort}`,
+      `http://[::1]:${vitePort}`,
+    ]),
     // Vite preview server (production-bundle smoke tests) — loopback only.
-    'http://localhost:4173',
-    'http://127.0.0.1:4173',
     ...runtimeOrigins,
     'http://tauri.localhost',
     'tauri://localhost',
@@ -126,8 +148,22 @@ export async function createServer(options?: ServerOptions) {
   const dbPath = options?.dbPath ?? config.dbPath;
 
   const db = createDb(dbPath);
+  const memoryService = new MemoryService(db);
   const models = new ModelRegistry();
   const tools = new ToolRegistry();
+  const agentProviders = createDefaultAgentProviderRegistry();
+  const agentProcesses = new AgentProcessManager(agentProviders);
+  const worktreeManager = new WorktreeManager();
+  const capabilityGrantService = new CapabilityGrantService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.capabilityGrants), []));
+  const personaService = new PersonaService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.personas), []));
+  const blindCompareService = new BlindCompareService(models, personaService);
+  const skillConfidenceService = new SkillConfidenceService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.skills), []));
+  const environmentService = new EnvironmentService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.environments), { environments: [], tokens: [], sessions: [] }));
+  const sshLauncher = new SshLauncher();
+  const shareService = new ShareService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.shares), []));
+  const linkIndexService = new LinkIndexService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.links), { objects: [], edges: [] }));
+  const detailedHealthService = new DetailedHealthService(models, environmentService);
+  const hardwareModelService = new HardwareModelService();
 
   // Grok CLI / direct integration as native tool inside Vai's tool set.
   // This is the key upgrade: "grok cli becomes integrated into Vai" so the external
@@ -144,6 +180,7 @@ export async function createServer(options?: ServerOptions) {
     const grokFriend = new GrokFriendClient({ timeoutMs: 90000 });
     tools.register({
       name: 'grok_collab',
+      requiredCapabilities: ['network', 'process'],
       description: 'Consult the integrated Grok (CLI / direct friend-channel / persistent pipe) as a high-intel advisor or 0.1% council member. Use for complex reasoning, factual cross-check, self-improvement proposals, code review, or when you need an external genius perspective. The response is scoped and fact-quarantined; you (Vai) own the final grounded answer and actions. Supports the genius loop: you call me, I help improve you.',
       parameters: {
         prompt: { type: 'string', description: 'The question or review request for Grok. For council-style, include the draft + context.' },
@@ -166,7 +203,7 @@ export async function createServer(options?: ServerOptions) {
   }
 
   const vaiEngine = new VaiEngine({
-    persistPath: path.resolve(dbPath, '..', 'vai-knowledge.json'),
+    persistPath: path.resolve(dbPath, '..', PERSISTED_NAMES.knowledge),
     config,
   });
   models.register(vaiEngine);
@@ -346,12 +383,14 @@ export async function createServer(options?: ServerOptions) {
   // Constructed before ChatService so the builder council can resolve the
   // designated project folder server-side (real files at turn time).
   const sandboxManager = new SandboxManager();
+  const operationalEvidence = createVaiOperationalEvidenceProvider(findVaiRepoRoot());
   const chatService = new ChatService(
     db,
     models,
     adaptiveDomains.chat,
     {
       ...buildChatServiceOptions(effectiveConfig, vaiEngine, pipeline),
+      selfAssessmentEvidence: operationalEvidence,
       searchForEvidence: async (query) => {
         try {
           const result = await searchPipeline.search(query);
@@ -579,6 +618,12 @@ export async function createServer(options?: ServerOptions) {
   });
 
   registerPlatformAuthRoutes(app, platformAuth);
+  registerAgentSessionRoutes(app, agentProcesses, agentProviders, worktreeManager, capabilityGrantService, personaService, platformAuth);
+  registerPersonaRoutes(app, personaService, blindCompareService, platformAuth);
+  registerLearnedSkillRoutes(app, skillConfidenceService, platformAuth);
+  registerEnvironmentRoutes(app, environmentService, platformAuth);
+  registerSshLaunchRoutes(app, sshLauncher, platformAuth);
+  registerDetailedHealthRoutes(app, detailedHealthService, hardwareModelService, platformAuth);
   registerCompanionContextRoutes(app, platformAuth, companionContextBroker);
   registerConversationRoutes(app, chatService, config.defaultModelId, platformAuth, sandboxManager, projectService);
   registerModelRoutes(app, models);
@@ -589,6 +634,13 @@ export async function createServer(options?: ServerOptions) {
     grokFriendClient,
     workspaceStatusReader,
     localSteeringWorker,
+    extractMemory: (conversationId, userId) => {
+      const transcript = chatService.getMessages(conversationId)
+        .map((message) => `${message.role}: ${message.content}`)
+        .join('\n');
+      void memoryService.extractFromText(userId, conversationId, transcript)
+        .catch((error) => app.log.warn({ err: error instanceof Error ? error.message : String(error) }, 'automatic memory extraction failed'));
+    },
   });
   registerIngestRoutes(app, pipeline);
   registerImageRoutes(app, pipeline, chatService);
@@ -632,10 +684,15 @@ export async function createServer(options?: ServerOptions) {
   registerSkillRoutes(app);
   registerFeedbackRoutes(app, db);
   registerSteeringRoutes(app, guidanceStore);
-  registerAgentIntrospectRoutes(app, { models, fallbackChain: effectiveConfig.fallbackChain.models, chatService });
+  registerAgentIntrospectRoutes(app, {
+    models,
+    fallbackChain: effectiveConfig.fallbackChain.models,
+    chatService,
+    operationalEvidence,
+  });
   registerCouncilChangelogRoutes(app);
   registerKnowledgeGraphRoutes(app, { chatService, auth: platformAuth });
-  registerMemoryRoutes(app, { memory: new MemoryService(db), chatService, auth: platformAuth });
+  registerMemoryRoutes(app, { memory: memoryService, chatService, auth: platformAuth });
 
   app.get('/api/usage', async (request) => {
     const query = request.query as { from?: string; to?: string };
@@ -664,6 +721,11 @@ export async function createServer(options?: ServerOptions) {
   const sessionService = new SessionService(db);
   sessionService.ensureTables();
   registerSessionRoutes(app, sessionService);
+  registerAdoptionDataRoutes(app, {
+    auth: platformAuth, environments: environmentService, links: linkIndexService,
+    memory: memoryService, personas: personaService, shares: shareService,
+    skills: skillConfidenceService, sessions: sessionService,
+  });
 
   try {
     db.run(/* sql */ `CREATE TABLE IF NOT EXISTS usage_records (

@@ -1,5 +1,6 @@
 /** Default keyboard shortcuts — ids are stable for user overrides. */
 export type ShortcutId =
+  | 'globalDictation'
   | 'quickSwitch'
   | 'settings'
   | 'cycleSidebar'
@@ -27,10 +28,19 @@ export interface ShortcutDefinition {
   id: ShortcutId;
   keys: string;
   description: string;
-  category: 'navigation' | 'workspace' | 'modes' | 'panels';
+  category: 'voice' | 'navigation' | 'workspace' | 'modes' | 'panels';
 }
 
+export const GLOBAL_DICTATION_SHORTCUTS = [
+  'Win+Alt',
+  'Ctrl+Shift+Space',
+  'Ctrl+Alt+Space',
+  'Alt+Shift+Space',
+  'Ctrl+Shift+F12',
+] as const;
+
 export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
+  { id: 'globalDictation', keys: 'Win+Alt', description: 'Hold to dictate into the field focused at release', category: 'voice' },
   { id: 'quickSwitch', keys: 'Ctrl+K', description: 'Quick switch — search conversations and destinations', category: 'navigation' },
   { id: 'settings', keys: 'Ctrl+,', description: 'Open settings', category: 'navigation' },
   { id: 'cycleSidebar', keys: 'Ctrl+S', description: 'Cycle sidebar: expanded → rail → hidden', category: 'workspace' },

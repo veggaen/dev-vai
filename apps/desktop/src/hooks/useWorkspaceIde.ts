@@ -3,8 +3,8 @@
  */
 
 import { useEffect } from 'react';
-import type { IdeEvent } from '@vai/api-types/ide-ws';
-import { ideEventSchema } from '@vai/api-types/ide-ws';
+import type { IdeEvent } from '@vai/contracts/ide-ws';
+import { ideEventSchema } from '@vai/contracts/ide-ws';
 import { useWorkspaceStore } from '../stores/workspaceStore.js';
 
 export function useWorkspaceIde() {

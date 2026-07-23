@@ -8,6 +8,7 @@ import type {
   CouncilCodegenMember,
   CouncilCodegenMessage,
   CouncilCodegenResult,
+  CouncilWithheldProposal,
 } from './types.js';
 
 const VALID_APP_TSX = [
@@ -47,6 +48,7 @@ const VALID_APP_TSX = [
 
 const VALID_CSS = [
   ':root { color: #eee; }',
+  '*, *::before, *::after { box-sizing: border-box; }',
   'body { margin: 0; background: #111; font-family: Inter, system-ui, sans-serif; }',
   '.shell { max-width: 720px; margin: 0 auto; padding: 24px; }',
   '.shell h1 { font-size: 28px; letter-spacing: -0.02em; }',
@@ -173,8 +175,9 @@ describe('councilGenerateApp — repair loop', () => {
     expect(result!.validation.ok).toBe(true);
   }, 20_000);
 
-  it('repairs when a reviewer raises a must-fix', async () => {
-    const coder = smartCoder('local:big', [VALID_APP_TSX]);
+  it('accepts a distinct clean rewrite when a reviewer raises a must-fix', async () => {
+    const rewritten = VALID_APP_TSX.replace('Plant Care', 'Plant Care Tracker');
+    const coder = smartCoder('local:big', [VALID_APP_TSX, rewritten]);
     let reviewCount = 0;
     const reviewer = stubMember('local:small', () => {
       reviewCount += 1;
@@ -186,6 +189,16 @@ describe('councilGenerateApp — repair loop', () => {
     expect(result!.repairsUsed).toBe(1);
     expect(reviewCount).toBe(1); // reviewers are not re-consulted after repair
     expect(coder.calls.length).toBe(4); // architect + app + one repair + stylist
+  }, 20_000);
+
+  it('withholds a fresh build when reviewer must-fixes survive unchanged repairs', async () => {
+    const coder = smartCoder('local:big', [VALID_APP_TSX]);
+    const reviewer = stubMember('local:small', () => '{"verdict":"needs-work","mustFix":["broken image placeholder"],"notes":[]}');
+    const { result, events } = await runPipeline([coder, reviewer]);
+    expect(result).toBeNull();
+    expect(events.some((event) => event.type === 'stage'
+      && event.stage === 'validate'
+      && event.label.includes('Build withheld'))).toBe(true);
   }, 20_000);
 
   it('returns null when the code never validates', async () => {
@@ -293,14 +306,77 @@ describe('validateGeneratedApp', () => {
     expect(report.errors.some((e) => e.includes('index'))).toBe(true);
   });
 
-  it('flags mostly-unstyled Tailwind-style classes as a soft (repairable, non-fatal) error', async () => {
+  it('rejects Tailwind-style classes because the plain-CSS sandbox cannot execute them', async () => {
     const tailwindy = VALID_APP_TSX
       .replace('className="shell"', 'className="flex flex-col gap-4 p-6 bg-gray-900"')
       .replace('className="plant-list"', 'className="text-green-600 font-medium rounded-lg"');
     const report = await validateGeneratedApp({ appTsx: tailwindy, stylesCss: VALID_CSS });
-    // Soft: drives a repair pass but never discards a compilable app.
+    expect(report.ok).toBe(false);
+    expect(report.errors.some((e) => e.includes('utility-framework'))).toBe(true);
+  });
+
+  it('does not mistake conditional-expression punctuation for a utility class', async () => {
+    const conditional = VALID_APP_TSX.replace(
+      'className="plant-list"',
+      'className={plants.length > 0 ? "plant-list" : "plant-list-empty"}',
+    );
+    const report = await validateEditedFiles(new Map([['src/App.tsx', conditional]]), ['src/App.tsx']);
     expect(report.ok).toBe(true);
-    expect(report.softErrors.some((e) => e.includes('unstyled'))).toBe(true);
+    expect(report.errors.some((error) => error.includes('utility-framework'))).toBe(false);
+  });
+
+  it('rejects broken image placeholders and progress controls that can exceed the book total', async () => {
+    const unsafe = VALID_APP_TSX
+      .replace("name: 'Monstera', watered: false", "name: 'Monstera', watered: false, coverImage: '#', currentPage: 12, totalPages: 10")
+      .replace('type Plant = { id: number; name: string; watered: boolean };', 'type Plant = { id: number; name: string; watered: boolean; coverImage?: string; currentPage?: number; totalPages?: number };');
+    const report = await validateEditedFiles(
+      new Map([['src/App.tsx', unsafe]]),
+      ['src/App.tsx'],
+      { brief: 'Build a reading tracker with progress controls.' },
+    );
+    expect(report.ok).toBe(false);
+    expect(report.errors.some((error) => error.includes('broken-image'))).toBe(true);
+    expect(report.errors.some((error) => error.includes('cannot exceed 100%'))).toBe(true);
+  });
+
+  it('rejects raw SVG data-image markup that browser rendering can break', async () => {
+    const rawDataImage = VALID_APP_TSX.replace(
+      '<h1>Plant Care</h1>',
+      '<img src={`data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><text>Book</text></svg>`} alt="Book" />',
+    );
+    const report = await validateEditedFiles(new Map([['src/App.tsx', rawDataImage]]), ['src/App.tsx']);
+    expect(report.ok).toBe(false);
+    expect(report.errors.some((error) => error.includes('raw SVG markup'))).toBe(true);
+  });
+
+  it('requires real browser storage when the build brief promises persistent local state', async () => {
+    const missing = await validateEditedFiles(
+      new Map([['src/App.tsx', VALID_APP_TSX]]),
+      ['src/App.tsx'],
+      { brief: 'Build a reading tracker with persistent local state that survives reloads.' },
+    );
+    expect(missing.ok).toBe(false);
+    expect(missing.errors.some((error) => error.includes('browser storage'))).toBe(true);
+
+    const persistent = VALID_APP_TSX
+      .replace('useState(seed)', "useState<Plant[]>(() => (JSON.parse(localStorage.getItem('plants') ?? 'null') as Plant[] | null) ?? seed)")
+      .replace('function toggle(id: number) {', "localStorage.setItem('plants', JSON.stringify(plants));\n  function toggle(id: number) {");
+    const present = await validateEditedFiles(
+      new Map([['src/App.tsx', persistent]]),
+      ['src/App.tsx'],
+      { brief: 'Build a reading tracker with persistent local state.' },
+    );
+    expect(present.ok).toBe(true);
+  });
+
+  it('requests a stylist repair when CSS lacks overflow-safe sizing or a narrow-screen layout', async () => {
+    const unsafeCss = VALID_CSS
+      .replace('*, *::before, *::after { box-sizing: border-box; }\n', '')
+      .replace('@media (max-width: 600px) { .shell { padding: 12px; } }', '');
+    const report = await validateGeneratedApp({ appTsx: VALID_APP_TSX, stylesCss: unsafeCss });
+    expect(report.ok).toBe(true);
+    expect(report.softErrors.join(' ')).toContain('border-box');
+    expect(report.softErrors.join(' ')).toContain('@media');
   });
 
   it('ships a compilable app even when soft styling issues persist after stylist repairs', async () => {
@@ -458,6 +534,60 @@ describe('councilGenerateApp — edit mode', () => {
     expect(events.some((e) => e.type === 'stage' && e.label.includes('targeted change'))).toBe(true);
   });
 
+  it('deterministically repairs legacy global JSX return annotations in generated artwork components', async () => {
+    const appWithArtwork = VALID_APP_TSX
+      .replace(
+        'export default function App() {',
+        'function CoverArtwork(): JSX.Element {\n  return <svg role="img" aria-label="Original botanical cover" viewBox="0 0 80 120"><path d="M8 100 C24 54 48 44 72 18" /></svg>;\n}\n\nexport default function App() {',
+      )
+      .replace('<h1>Plant Care</h1>', '<h1>Plant Care</h1><CoverArtwork />');
+    const coder = stubMember('local:coder', () => appBlock(appWithArtwork));
+
+    const { result, events } = await runPipeline(
+      [coder],
+      'Add accessible self-contained inline SVG cover artwork without external image URLs.',
+    );
+
+    expect(result, JSON.stringify(events)).not.toBeNull();
+    expect(result!.output).toContain('<svg role="img"');
+    expect(result!.output).not.toContain('JSX.Element');
+    expect(events.some((event) => event.type === 'stage'
+      && event.stage === 'repair'
+      && event.detail?.includes('global JSX component return annotation'))).toBe(true);
+  });
+
+  it('guards dynamic string lookups into literal inline-SVG artwork maps', async () => {
+    const appWithArtworkMap = VALID_APP_TSX
+      .replace(
+        'export default function App() {',
+        [
+          'function IllustratedCover({ title }: { title: string }) {',
+          '  const covers = {',
+          '    Monstera: <svg role="img" aria-label="Monstera cover" viewBox="0 0 80 120"><path d="M8 100 C24 54 48 44 72 18" /></svg>,',
+          '    Fern: <svg role="img" aria-label="Fern cover" viewBox="0 0 80 120"><path d="M10 90 C30 70 45 35 70 20" /></svg>,',
+          '  };',
+          '  return <div>{covers[title]}</div>;',
+          '}',
+          '',
+          'export default function App() {',
+        ].join('\n'),
+      )
+      .replace('<h1>Plant Care</h1>', '<h1>Plant Care</h1><IllustratedCover title="Monstera" />');
+    const coder = stubMember('local:coder', () => appBlock(appWithArtworkMap));
+
+    const { result, events } = await runPipeline(
+      [coder],
+      'Add distinct accessible inline SVG cover artwork selected by item title.',
+    );
+
+    expect(result, JSON.stringify(events)).not.toBeNull();
+    expect(result!.output).toContain('Object.prototype.hasOwnProperty.call(covers, title)');
+    expect(result!.output).toContain('covers[title as keyof typeof covers]');
+    expect(events.some((event) => event.type === 'stage'
+      && event.stage === 'repair'
+      && event.detail?.includes('dynamic illustrated-cover map lookup'))).toBe(true);
+  });
+
   it('rejects an edit that tries to rewrite scaffold-owned files', async () => {
     const coder = stubMember('local:big', () => [
       '```json title="package.json"',
@@ -470,6 +600,242 @@ describe('councilGenerateApp — edit mode', () => {
       && event.stage === 'validate'
       && event.label.includes('Edit withheld'))).toBe(true);
   });
+
+  it('carries a withheld proposal and its reviewer evidence into the next turn', async () => {
+    const firstApp = VALID_APP_TSX.replace('<h1>Plant Care</h1>', '<div className="reading-room-grain" /><h1>Plant Care</h1>');
+    const firstCoder = stubMember('local:first-coder', () => appBlock(firstApp));
+    const blockingReviewer = stubMember('local:reviewer', () => JSON.stringify({
+      verdict: 'needs-work',
+      mustFix: ['Add a visible paper-grain layer without removing the existing controls.'],
+      notes: [],
+    }));
+    let withheld: CouncilWithheldProposal | undefined;
+    const firstEvents: CouncilCodegenEvent[] = [];
+    for await (const event of councilGenerateApp({
+      brief: 'Redesign the reading room with a paper-grain layer.',
+      members: [firstCoder, blockingReviewer],
+      edit,
+      maxRepairs: 0,
+    })) {
+      firstEvents.push(event);
+      if (event.type === 'result') withheld = event.withheld;
+    }
+
+    expect(withheld, JSON.stringify(firstEvents)).toBeDefined();
+    expect(withheld!.files.map((file) => file.path)).toEqual(['src/App.tsx']);
+    expect(withheld!.reviews[0].mustFix).toContain('Add a visible paper-grain layer without removing the existing controls.');
+
+    const resumedApp = firstApp.replace('<div className="reading-room-grain" />', '<div className="reading-room-grain" aria-hidden="true" />');
+    const repairCoder = stubMember('local:second-coder', () => appBlock(resumedApp));
+    const cleanReviewer = stubMember('local:reviewer', () => '{"verdict":"ship","mustFix":[],"notes":["resolved"]}');
+    const events: CouncilCodegenEvent[] = [];
+    let result: CouncilCodegenResult | null = null;
+    for await (const event of councilGenerateApp({
+      brief: 'Retry the withheld reading-room edit and fix the remaining issue.',
+      members: [repairCoder, cleanReviewer],
+      edit,
+      resume: withheld,
+      maxRepairs: 1,
+    })) {
+      events.push(event);
+      if (event.type === 'result') result = event.result;
+    }
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain('aria-hidden="true"');
+    expect(events.some((event) => event.type === 'stage' && event.label.includes('Resumed a 1-file withheld proposal'))).toBe(true);
+    expect(repairCoder.calls).toHaveLength(1);
+    expect(repairCoder.calls[0][1].content).toContain('YOUR PREVIOUS (REJECTED) EDIT');
+    expect(repairCoder.calls[0][1].content).toContain('reading-room-grain');
+  }, 15_000);
+
+  it('requires review after a resumed static-validation failure is repaired', async () => {
+    const staticFailure: CouncilWithheldProposal = {
+      schemaVersion: 1,
+      projectName: edit.projectName,
+      brief: 'Create a polished reading-room design.',
+      files: [
+        { path: 'src/App.tsx', content: VALID_APP_TSX },
+        { path: 'src/styles.css', content: fancyCss },
+        { path: 'index.html', content: '<!doctype html><div id="root"></div>' },
+      ],
+      validation: {
+        ok: false,
+        errors: ['index.html is scaffold-owned'],
+        softErrors: [],
+        warnings: [],
+        checker: 'tsc',
+      },
+      reviews: [],
+      repairsUsed: 2,
+      memberIds: ['local:first-coder'],
+    };
+    const repairCoder = stubMember('local:second-coder', () => appBlock(VALID_APP_TSX));
+    const reviewer = stubMember('local:reviewer', () => JSON.stringify({
+      verdict: 'needs-work',
+      mustFix: ['The repaired proposal is still visually generic.'],
+      notes: [],
+    }));
+    const events: CouncilCodegenEvent[] = [];
+    let result: CouncilCodegenResult | null = null;
+    let nextWithheld: CouncilWithheldProposal | undefined;
+    for await (const event of councilGenerateApp({
+      brief: 'Resume the withheld proposal and remove the scaffold-owned file.',
+      members: [repairCoder, reviewer],
+      edit,
+      resume: staticFailure,
+      maxRepairs: 1,
+    })) {
+      events.push(event);
+      if (event.type === 'result') {
+        result = event.result;
+        nextWithheld = event.withheld;
+      }
+    }
+
+    expect(result).toBeNull();
+    expect(reviewer.calls).toHaveLength(1);
+    expect(nextWithheld?.reviews[0].mustFix).toEqual(['The repaired proposal is still visually generic.']);
+    expect(events.some((event) => event.type === 'stage'
+      && event.label.includes('reviewing the repaired shared proposal'))).toBe(true);
+  }, 15_000);
+
+  it('preserves the original acceptance contract when validating a continuation', async () => {
+    const originalContract: CouncilWithheldProposal = {
+      schemaVersion: 1,
+      projectName: edit.projectName,
+      brief: 'Create distinct illustrated covers and do not reuse the purple/pink gradient.',
+      files: [
+        { path: 'src/App.tsx', content: VALID_APP_TSX },
+        { path: 'src/styles.css', content: `${VALID_CSS}\n.book-cover { background: #7c3aed; }` },
+      ],
+      validation: {
+        ok: false,
+        errors: ['Add accessible labels.'],
+        softErrors: [],
+        warnings: [],
+        checker: 'tsc',
+      },
+      reviews: [],
+      repairsUsed: 1,
+      memberIds: ['local:coder'],
+    };
+    let withheld: CouncilWithheldProposal | undefined;
+    for await (const event of councilGenerateApp({
+      brief: 'Resume the proposal and add the missing accessible labels.',
+      members: [stubMember('local:coder', () => appBlock(VALID_APP_TSX))],
+      edit,
+      resume: originalContract,
+      maxRepairs: 0,
+    })) {
+      if (event.type === 'result') withheld = event.withheld;
+    }
+
+    expect(withheld?.brief).toContain('do not reuse the purple/pink gradient');
+    expect(withheld?.brief).toContain('Continuation request:');
+    expect(withheld?.validation.errors).toContain('The explicitly rejected purple/pink gradient palette is still present in the stylesheet.');
+  });
+
+  it('withholds empty inline-SVG placeholders and a missing requested dark atmosphere', async () => {
+    const placeholderApp = VALID_APP_TSX
+      .replace('<h1>Plant Care</h1>', '<h1>Plant Care</h1><svg aria-label="Book cover">{/* artwork later */}</svg>');
+    const lightCss = VALID_CSS.replace('background: #111', 'background: #f4f4f9');
+    const coder = stubMember('local:coder', () => [
+      appBlock(placeholderApp),
+      `\`\`\`css title="src/styles.css"\n${lightCss}\n\`\`\``,
+    ].join('\n'));
+    let withheld: CouncilWithheldProposal | undefined;
+    for await (const event of councilGenerateApp({
+      brief: 'Add accessible inline SVG cover artwork and a deep-ink atmospheric background.',
+      members: [coder],
+      edit,
+      maxRepairs: 0,
+    })) {
+      if (event.type === 'result') withheld = event.withheld;
+    }
+
+    expect(withheld?.validation.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('empty SVG placeholder'),
+      expect.stringContaining('deep-ink/dark page atmosphere is missing'),
+    ]));
+  });
+
+  it('withholds repeated text-only covers, a rejected purple palette, and missing texture', async () => {
+    const repeatedCovers = [
+      '<svg aria-label="First cover" viewBox="0 0 24 36"><rect width="24" height="36" fill="#f5e7dc" /><text x="12" y="22" text-anchor="middle" font-family="Serif" font-size="12">A</text></svg>',
+      '<svg aria-label="Second cover" viewBox="0 0 24 36"><rect width="24" height="36" fill="#efe1d5" /><text x="12" y="22" text-anchor="middle" font-family="Serif" font-size="12">B</text></svg>',
+    ].join('');
+    const repeatedApp = VALID_APP_TSX.replace('<h1>Plant Care</h1>', `<h1>Plant Care</h1>${repeatedCovers}`);
+    const purpleCss = `${VALID_CSS}\n.book-cover { background: linear-gradient(145deg, #111827, #7c3aed, #ec4899); }`;
+    const coder = stubMember('local:coder', () => [
+      appBlock(repeatedApp),
+      `\`\`\`css title="src/styles.css"\n${purpleCss}\n\`\`\``,
+    ].join('\n'));
+    let withheld: CouncilWithheldProposal | undefined;
+    const events: CouncilCodegenEvent[] = [];
+    for await (const event of councilGenerateApp({
+      brief: 'Create genuinely distinct cover compositions with real illustration, do not reuse the purple/pink gradient, and add subtle paper texture.',
+      members: [coder],
+      edit,
+      maxRepairs: 0,
+    })) {
+      events.push(event);
+      if (event.type === 'result') withheld = event.withheld;
+    }
+
+    expect(withheld?.validation.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('reuse the same non-text structure'),
+      expect.stringContaining('only text/background shapes'),
+      expect.stringContaining('purple/pink gradient palette'),
+      expect.stringContaining('paper/line texture is missing'),
+    ]));
+    const app = withheld?.files.find((file) => file.path === 'src/App.tsx')?.content ?? '';
+    expect(app).toContain('textAnchor="middle"');
+    expect(app).not.toContain('text-anchor=');
+    expect(events.some((event) => event.type === 'stage'
+      && event.detail?.includes('React DOM property names'))).toBe(true);
+  });
+
+  it('withholds unrecognizable title scenes and missing search-to-grid spacing', async () => {
+    const weakScenes = [
+      'function BookCover({ title }: { title: string }) {',
+      '  switch (title) {',
+      "    case 'To Kill a Mockingbird': return (<svg><circle cx=\"12\" cy=\"18\" r=\"10\" /><path d=\"M1 1L2 2\" /></svg>);",
+      "    case '1984': return (<svg><circle cx=\"12\" cy=\"18\" r=\"10\" /><ellipse cx=\"12\" cy=\"18\" rx=\"8\" ry=\"4\" /><line x1=\"6\" y1=\"18\" x2=\"18\" y2=\"18\" /><line x1=\"6\" y1=\"18\" x2=\"18\" y2=\"18\" /><line x1=\"6\" y1=\"18\" x2=\"18\" y2=\"18\" /></svg>);",
+      "    case 'The Great Gatsby': return (<svg><rect width=\"12\" height=\"24\" /><rect width=\"12\" height=\"24\" /><circle cx=\"12\" cy=\"18\" r=\"2\" /></svg>);",
+      "    case 'Pride and Prejudice': return (<svg><ellipse cx=\"12\" cy=\"18\" rx=\"8\" ry=\"4\" /><path d=\"M1 1L2 2\" /><path d=\"M1 1L2 2\" /></svg>);",
+      "    case 'The Catcher in the Rye': return (<svg><line x1=\"6\" y1=\"18\" x2=\"18\" y2=\"18\" /><line x1=\"6\" y1=\"18\" x2=\"18\" y2=\"18\" /><line x1=\"6\" y1=\"18\" x2=\"18\" y2=\"18\" /><path d=\"M1 1L2 2\" /></svg>);",
+      '    default: return null;',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    const app = `${VALID_APP_TSX.replace('export default function App() {', `${weakScenes}export default function App() {`).replace('<h1>Plant Care</h1>', '<h1>Plant Care</h1><BookCover title="1984" />')}`;
+    const css = `${VALID_CSS}\n.search-bar { display: flex; }`;
+    const coder = stubMember('local:coder', () => [appBlock(app), `\`\`\`css title="src/styles.css"\n${css}\n\`\`\``].join('\n'));
+    let withheld: CouncilWithheldProposal | undefined;
+    for await (const event of councilGenerateApp({
+      brief: 'Mockingbird needs a moon, branch, and perched bird; for 1984 use an eye, pupil and surveillance rays; Gatsby needs an art-deco skyline and beacon; Pride and Prejudice needs a cameo with profiles and botanical leaves; Catcher in the Rye needs wheat and a horse. Every SVG needs a unique aria-label and role="img". Restore a gap inside the search/filter bar and margin before the cards grid. Keep a visible gap between the stats header and search. Add a repeating-linear-gradient texture plus a radial-gradient light layer.',
+      members: [coder],
+      edit,
+      maxRepairs: 0,
+    })) {
+      if (event.type === 'result') withheld = event.withheld;
+    }
+
+    expect(withheld?.validation.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('To Kill a Mockingbird cover does not yet contain'),
+      expect.stringContaining('1984 cover does not yet contain'),
+      expect.stringContaining('The Great Gatsby cover does not yet contain'),
+      expect.stringContaining('Pride and Prejudice cover does not yet contain'),
+      expect.stringContaining('The Catcher in the Rye cover does not yet contain'),
+      expect.stringContaining('requested SVG cover(s) are missing both a meaningful aria-label and role="img"'),
+      expect.stringContaining('.search-bar needs both an internal gap and margin below'),
+      expect.stringContaining('separation between the stats header and search panel is missing'),
+      expect.stringContaining('repeating-linear-gradient texture is missing'),
+      expect.stringContaining('radial-gradient light layer is missing'),
+    ]));
+  }, 15_000);
 
   it('refuses truncated package JSON and mixed Storybook majors in external edits', async () => {
     const originalPackage = JSON.stringify({
@@ -512,4 +878,334 @@ describe('councilGenerateApp — edit mode', () => {
       expect(result).toBeNull();
       expect(events.some((event) => event.type === 'stage'
         && event.stage === 'validate'
-        && 
+        && /invalid JSON|mixes Storybook major versions/.test(event.detail ?? ''))).toBe(true);
+    }
+  });
+
+  it('refuses to ship when a reviewer must-fix survives a no-op repair', async () => {
+    const coder = stubMember('local:big', () => appBlock(VALID_APP_TSX));
+    const reviewer = stubMember('local:reviewer', () => JSON.stringify({
+      verdict: 'needs-work',
+      mustFix: ['client RPC URL still ends in /undefined'],
+      notes: [],
+    }));
+
+    const { result, events } = await runPipeline(
+      [coder, reviewer],
+      'repair the undefined client RPC URL in src/App.tsx',
+    );
+
+    expect(result).toBeNull();
+    expect(events.some((event) => event.type === 'stage'
+      && event.label.includes('Edit refused')
+      && event.detail?.includes('/undefined'))).toBe(true);
+  }, 20_000);
+
+  it('re-reviews a distinct repair and ships only after the must-fix clears', async () => {
+    const repairedApp = VALID_APP_TSX.replace('<h1>Plant Care</h1>', '<h1>Plant Care Pro</h1>');
+    const coder = stubMember('local:big', (_messages, call) => appBlock(call === 1 ? VALID_APP_TSX : repairedApp));
+    const reviewer = stubMember('local:reviewer', (_messages, call) => JSON.stringify(call === 1
+      ? { verdict: 'needs-work', mustFix: ['requested repaired heading is missing'], notes: [] }
+      : { verdict: 'ship', mustFix: [], notes: [] }));
+
+    const { result } = await runPipeline(
+      [coder, reviewer],
+      'change the heading to Plant Care Pro in src/App.tsx',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain('Plant Care Pro');
+    expect(reviewer.calls).toHaveLength(2);
+  });
+
+  it('cannot vote away a reported client /undefined RPC signature', async () => {
+    const unsafeApp = VALID_APP_TSX.replace(
+      'export default function App()',
+      'const rpc = `https://mainnet.infura.io/v3/${process.env.INFURA}`;\nexport default function App()',
+    );
+    const coder = stubMember('local:big', () => appBlock(unsafeApp));
+    const reviewer = stubMember('local:reviewer', () => JSON.stringify({
+      verdict: 'ship',
+      mustFix: [],
+      notes: [],
+    }));
+
+    const { result, events } = await runPipeline(
+      [coder, reviewer],
+      'Repair the observed /undefined RPC because browser code reads a server-only environment value.',
+    );
+
+    expect(result).toBeNull();
+    expect(events.some((event) => event.type === 'stage'
+      && event.detail?.includes('server-only process.env'))).toBe(true);
+  }, 20_000);
+
+  it('deterministically repairs known Wagmi client-RPC and optional analytics signatures', async () => {
+    const unsafeApp = VALID_APP_TSX.replace(
+      'export default function App()',
+      [
+        'const http = (url?: string) => url;',
+        'const transport = http(`https://mainnet.infura.io/v3/${process.env.INFURA}`);',
+        'declare global { interface Window { __APPKIT_INITIALIZED__?: boolean } }',
+        'const createAppKit = (_options: unknown) => undefined;',
+        'const appkitProjectId = process.env.NEXT_PUBLIC_PROJECT_ID as string;',
+        "if (typeof window !== 'undefined' && !window.__APPKIT_INITIALIZED__) {",
+        '  createAppKit({',
+        '    projectId: appkitProjectId,',
+        '    features: { analytics: true },',
+        '  })',
+        '  window.__APPKIT_INITIALIZED__ = true',
+        '}',
+        'export default function App()',
+      ].join('\n'),
+    );
+    const coder = stubMember('local:big', () => appBlock(unsafeApp));
+    const reviewer = stubMember('local:reviewer', () => JSON.stringify({
+      verdict: 'needs-work',
+      mustFix: [
+        'The projectId is read directly from an environment variable and may be undefined at runtime.',
+        'AppKit analytics or network failures are not handled and can become an uncaught page error.',
+      ],
+      notes: [],
+    }));
+
+    const { result, events } = await runPipeline(
+      [coder, reviewer],
+      'Repair the observed /undefined RPC from a server-only env and stop optional AppKit analytics from becoming an uncaught page error.',
+    );
+
+    expect(result, JSON.stringify(events)).not.toBeNull();
+    expect(result!.output).toContain('const transport = http();');
+    expect(result!.output).toContain('analytics: false');
+    expect(result!.output).not.toContain('process.env.INFURA');
+    expect(result!.output).toContain("process.env.NEXT_PUBLIC_PROJECT_ID?.trim() ?? ''");
+    expect(result!.output).toContain('Boolean(appkitProjectId)');
+    expect(result!.output).toContain("console.error('AppKit initialization failed without blocking the app shell.'");
+    expect(events.some((event) => event.type === 'stage'
+      && event.label.includes('deterministic runtime-safety'))).toBe(true);
+    expect(events.some((event) => event.type === 'stage'
+      && event.label.includes('stale reviewer claim'))).toBe(true);
+  });
+
+  it('deterministically repairs the observed Book Tracker cover, progress, and hydration signatures', async () => {
+    const unsafeBookApp = [
+      "import { useEffect, useState } from 'react';",
+      'interface Book { id: string; title: string; coverImage: string; currentPage: number; totalPages: number; }',
+      "const books: Book[] = [{ id: '1', title: '1984', coverImage: '#', currentPage: 20, totalPages: 100 }];",
+      'export default function App() {',
+      "  const [booksState, setBooksState] = useState<Book[]>(books);",
+      "  useEffect(() => { localStorage.setItem('books', JSON.stringify(booksState)); }, [booksState]);",
+      "  useEffect(() => { const savedBooks = localStorage.getItem('books'); if (savedBooks) { setBooksState(JSON.parse(savedBooks)); } }, []);",
+      "  const filteredBooks = booksState.filter((book) => book.title).map((book, index) => (",
+      '    <article className="book-card" key={book.id}>',
+      '      <img src={book.coverImage} alt={book.title} />',
+      '      <input type="number" min="1" max={book.totalPages} value={book.currentPage} onChange={(e) => {',
+      '        const newBooks = [...booksState];',
+      '        newBooks[index].currentPage = parseInt(e.target.value, 10);',
+      '        setBooksState(newBooks);',
+      '      }} />',
+      '    </article>',
+      '  ));',
+      '  return <main className="app"><div className="book-stack">{filteredBooks}</div></main>;',
+      '}',
+    ].join('\n');
+    const bookCss = [
+      '*, *::before, *::after { box-sizing: border-box; }',
+      'body { margin: 0; background: #111827; font-family: Inter, sans-serif; }',
+      '.app { min-height: 100vh; padding: 2rem; }',
+      '.book-stack { display: grid; gap: 1rem; }',
+      '.book-card { padding: 1rem; background: #fff; border-radius: 1rem; }',
+      '.book-card input { width: 100%; }',
+      '.book-card input:hover { border-color: #7c3aed; }',
+      '.book-card input:focus-visible { outline: 2px solid #7c3aed; }',
+      '.book-card img { width: 100%; }',
+      '.book-card strong { color: #111827; }',
+      '@media (max-width: 600px) { .app { padding: 1rem; } }',
+    ].join('\n');
+    const projectEdit = {
+      projectName: 'book-tracker',
+      files: [
+        { path: 'src/App.tsx', content: unsafeBookApp },
+        { path: 'src/styles.css', content: bookCss },
+      ],
+    };
+    const coder = stubMember('local:coder', () => [appBlock(unsafeBookApp), cssBlock(bookCss)].join('\n'));
+    const reviewer = stubMember('local:reviewer', () => '{"verdict":"ship","mustFix":[],"notes":[]}');
+    const events: CouncilCodegenEvent[] = [];
+    let result: CouncilCodegenResult | null = null;
+    const brief = 'Replace every broken # cover image with self-contained CSS cover art. Clamp every currentPage update between 0 and totalPages so progress cannot exceed 100%. Preserve localStorage persistence.';
+
+    for await (const event of councilGenerateApp({ brief, members: [coder, reviewer], edit: projectEdit })) {
+      events.push(event);
+      if (event.type === 'result') result = event.result;
+    }
+
+    expect(result, JSON.stringify(events)).not.toBeNull();
+    expect(result!.output).toContain('className="book-cover"');
+    expect(result!.output).toContain('Math.max(0, Math.min(book.totalPages');
+    expect(result!.output).toContain('useState<Book[]>(() =>');
+    expect(result!.output).not.toContain("coverImage: '#'");
+    expect(result!.output).not.toContain('newBooks[index]');
+    expect(events.some((event) => event.type === 'stage'
+      && event.label.includes('deterministic runtime-safety'))).toBe(true);
+  }, 20_000);
+
+  it('repairs explicitly named reference files omitted by the coder and ignores unnamed files', async () => {
+    const appkit = [
+      "import { http } from 'wagmi'",
+      "export const projectId = process.env.NEXT_PUBLIC_PROJECT_ID as string",
+      'export const transports = {',
+      '  mainnet: http(`https://mainnet.infura.io/v3/${process.env.INFURAMAIN}`),',
+      '}',
+    ].join('\n');
+    const provider = [
+      "import { createAppKit } from '@reown/appkit/react'",
+      "import { projectId as appkitProjectId } from './appkit'",
+      "if (process.env.NODE_ENV === 'development') console.info('AppKit dev diagnostics')",
+      'declare global { interface Window { __APPKIT_INITIALIZED__?: boolean } }',
+      "if (typeof window !== 'undefined' && !window.__APPKIT_INITIALIZED__) {",
+      '  createAppKit({',
+      '    projectId: appkitProjectId,',
+      '    features: { analytics: true },',
+      '  })',
+      '  window.__APPKIT_INITIALIZED__ = true',
+      '}',
+    ].join('\r\n');
+    const omitted = 'export const untouched = true;';
+    const projectEdit = {
+      projectName: 'mpm-frontend',
+      external: true,
+      files: [
+        { path: 'lib/appkit.ts', content: appkit },
+        { path: 'lib/AppKitProvider.tsx', content: provider },
+        { path: 'lib/unrelated.ts', content: omitted },
+      ],
+    };
+    const coder = stubMember('local:big', () => `\`\`\`ts title="lib/appkit.ts"\n${appkit}\n\`\`\``);
+    const reviewer = stubMember('local:reviewer', () => JSON.stringify({
+      verdict: 'ship',
+      mustFix: [],
+      notes: [],
+    }));
+    const events: CouncilCodegenEvent[] = [];
+    let result: CouncilCodegenResult | null = null;
+    const brief = 'Repair /undefined RPC in lib/appkit.ts and the optional AppKit analytics uncaught page error in lib/AppKitProvider.tsx.';
+
+    for await (const event of councilGenerateApp({ brief, members: [coder, reviewer], edit: projectEdit })) {
+      events.push(event);
+      if (event.type === 'result') result = event.result;
+    }
+
+    expect(result, JSON.stringify(events)).not.toBeNull();
+    expect(result!.output).toContain('title="lib/appkit.ts"');
+    expect(result!.output).toContain('title="lib/AppKitProvider.tsx"');
+    expect(result!.output).not.toContain('title="lib/unrelated.ts"');
+    expect(result!.output).toContain('mainnet: http()');
+    expect(result!.output).toContain("process.env.NEXT_PUBLIC_PROJECT_ID?.trim() ?? ''");
+    expect(result!.output).toContain('analytics: false');
+    expect(result!.output).toContain('Boolean(appkitProjectId)');
+    expect(result!.output).toContain("console.error('AppKit initialization failed without blocking the app shell.'");
+    expect(result!.output).toContain("  try {\r\n    createAppKit({\r\n      projectId: appkitProjectId,");
+    expect(result!.output).not.toContain("projectId: appkitProjectId ?? ''");
+  });
+
+  async function runPipeline(members: readonly CouncilCodegenMember[], brief: string) {
+    const events: CouncilCodegenEvent[] = [];
+    let result: CouncilCodegenResult | null = null;
+    for await (const event of councilGenerateApp({ brief, members, edit })) {
+      events.push(event);
+      if (event.type === 'result') result = event.result;
+    }
+    return { events, result };
+  }
+});
+
+describe('parseActiveSandboxContext', () => {
+  it('parses project name and snapshot files from the desktop system prompt', () => {
+    const prompt = [
+      'ACTIVE SANDBOX PROJECT: "kanban-board"',
+      'Dev server is RUNNING at http://localhost:4102',
+      '',
+      'CURRENT FILE SNAPSHOTS:',
+      'FILE: src/App.tsx',
+      '```tsx',
+      'export default function App() { return null; }',
+      '```',
+      'FILE: src/styles.css',
+      '```css',
+      '.a { color: red; }',
+      '```',
+      '',
+      'EDITING RULES: prefer targeted edits.',
+    ].join('\n');
+    const ctx = parseActiveSandboxContext(prompt);
+    expect(ctx?.projectName).toBe('kanban-board');
+    expect(ctx?.files.map((f) => f.path)).toEqual(['src/App.tsx', 'src/styles.css']);
+  });
+
+  it('drops truncated snapshots and handles absent context', () => {
+    const prompt = [
+      'ACTIVE SANDBOX PROJECT: "x"',
+      'CURRENT FILE SNAPSHOTS:',
+      'FILE: src/App.tsx',
+      '```tsx',
+      'const a = 1;\n/* truncated for prompt context */',
+      '```',
+    ].join('\n');
+    expect(parseActiveSandboxContext(prompt)?.files).toEqual([]);
+    expect(parseActiveSandboxContext('You are in Builder mode.')).toBeNull();
+    expect(parseActiveSandboxContext(undefined)).toBeNull();
+  });
+});
+
+describe('brand blueprints', () => {
+  it('detects tinder-family briefs and demands the signature features', async () => {
+    const { detectBrandBlueprint } = await import('./brand-blueprints.js');
+    const bp = detectBrandBlueprint('build me a clone of tinder');
+    expect(bp?.brand).toBe('Tinder');
+    expect(bp!.features.join(' ')).toMatch(/It'?s a Match/i);
+    expect(bp!.features.join(' ')).toMatch(/likesYou/);
+    expect(bp!.reviewChecklist.join(' ')).toMatch(/no external image URLs/i);
+    expect(detectBrandBlueprint('build a recipe box app')).toBeNull();
+  });
+
+  it('threads the blueprint into architect/coder/reviewer prompts', async () => {
+    const { detectBrandBlueprint } = await import('./brand-blueprints.js');
+    const { buildArchitectMessages, buildCoderMessages, buildReviewerMessages } = await import('./prompts.js');
+    const bp = detectBrandBlueprint('tinder clone');
+    expect(buildArchitectMessages('tinder clone', bp)[0].content).toContain('BRAND BLUEPRINT — Tinder');
+    const spec = { title: 'T', packageName: 't', summary: 's', features: ['f'], fromArchitect: true } as const;
+    expect(buildCoderMessages('tinder clone', spec, bp)[0].content).toContain('fd297b');
+    expect(buildReviewerMessages('tinder clone', spec, 'code', bp)[0].content).toContain('must-fix');
+  });
+});
+
+describe('external asset ban', () => {
+  it('rejects external image URLs in App.tsx (the randomuser.me case)', async () => {
+    const withRemote = VALID_APP_TSX.replace(
+      "{ id: 1, name: 'Monstera', watered: false },",
+      "{ id: 1, name: 'Monstera', watered: false }, // https://randomuser.me/api/portraits/women/1.jpg",
+    ).replace('<h1>Plant Care</h1>', '<h1>Plant Care</h1><img src="https://randomuser.me/api/portraits/women/1.jpg" alt="x" />');
+    const report = await validateGeneratedApp({ appTsx: withRemote, stylesCss: VALID_CSS });
+    expect(report.ok).toBe(false);
+    expect(report.errors.some((e) => e.includes('randomuser.me'))).toBe(true);
+  });
+
+  it('allows the w3.org SVG namespace', async () => {
+    const withSvg = VALID_APP_TSX.replace(
+      '<h1>Plant Care</h1>',
+      '<h1>Plant Care</h1><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" /></svg>',
+    );
+    const report = await validateGeneratedApp({ appTsx: withSvg, stylesCss: VALID_CSS });
+    expect(report.ok).toBe(true);
+  });
+});
+
+describe('specFromBrief', () => {
+  it('strips build verbs and titles the remainder', () => {
+    const spec = specFromBrief('build me a houseplant watering tracker');
+    expect(spec.title.toLowerCase()).toContain('houseplant');
+    expect(spec.packageName).toMatch(/^[a-z0-9-]+$/);
+    expect(spec.fromArchitect).toBe(false);
+  });
+});

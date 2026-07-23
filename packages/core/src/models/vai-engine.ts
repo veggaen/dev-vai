@@ -47,6 +47,7 @@ import type {
   TurnThinking,
 } from './adapter.js';
 import { buildGroundedBuildBrief } from './grounded-build-brief.js';
+import { solveDeterministicReasoning } from './deterministic-reasoning.js';
 import {
   isExplicitResearchRequest,
   isExplicitWebSearchRequest,
@@ -83,6 +84,9 @@ import { tryRecencyFollowUp } from '../chat/recency-followup.js';
 import { tryWebConcludeTurn, wantsExplicitSourceReferences } from '../chat/web-conclude-turn.js';
 import { isCapabilitiesFallbackResponse } from '../chat/capabilities-fallback.js';
 import { tryEmitSingleClarifyingQuestion } from '../chat/single-clarifying-question.js';
+import { tryHandleDialogueTurn } from '../chat/dialogue-state.js';
+import { tryEmitVaiSelfAssessment } from '../chat/vai-self-assessment.js';
+import { tryReliableJobDesign } from '../chat/reliable-job-design.js';
 import {
   tryEmitBridgeCapabilityAudit,
   tryEmitPrivateLiveContextResponse,
@@ -100,6 +104,7 @@ import {
   formatCapitalAndCurrencyAnswer,
   formatCapitalAnswer,
   formatCapitalCurrencySlash,
+  formatCorrectedCapitalCurrencyFromBody,
   formatCurrencyCodeAnswer,
   formatOneWordCapitalFromBody,
   lookupCountryKeyFromCapitalPrompt,
@@ -134,6 +139,7 @@ import {
   normalizeFollowUpTopic as normalizeSharedFollowUpTopic,
 } from '../search/pipeline.js';
 import type { SearchResponse, SearchSnippet } from '../search/types.js';
+import type { WebSourceCapabilitySnapshot } from '../search/web-source-capabilities.js';
 import {
   IntuitiveRiskReasoner,
   type RiskAssessment,
@@ -147,6 +153,8 @@ import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, 
 import { analyze, type CognitiveFrame } from '../cognitive/index.js';
 import type { KindShape } from '../cognitive/shaper.js';
 import { detectTrickQuestion } from '../trick-questions/index.js';
+import { tryBoundedReasoning } from '../reasoning/bounded-reasoning.js';
+import { isUnsupportedStructuredReasoning } from '../reasoning/advanced-reasoning.js';
 import { KnowledgeConfidenceLedger, classifyFeedback, type DreamReport } from '../learning/confidence-ledger.js';
 import { preAct, act as oodaAct, type OodaTrace } from '../agentic/index.js';
 import * as tpl from './builder-templates.js';
@@ -269,6 +277,8 @@ export interface VaiSnapshot {
   strategyStats: Record<string, number>;
   /** Topics the user asked about that Vai couldn't answer */
   missedTopics: Record<string, number>;
+  /** Verified domain+venue+fact-shape observations used only for discovery hints. */
+  webSourceCapabilities?: WebSourceCapabilitySnapshot;
 }
 
 export interface VaiEngineOptions {
@@ -563,6 +573,7 @@ export class VaiEngine implements ModelAdapter {
       this.tokenizer.encode(text);
       this.schedulePersist();
     });
+    this.searchPipeline.setSourceCapabilityLearnCallback(() => this.schedulePersist());
 
     // Record how many entries are bootstrap (everything added above)
     this.bootstrapEntryCount = this.knowledge.entryCount;
@@ -1520,6 +1531,7 @@ export class VaiEngine implements ModelAdapter {
       learnedEntries,
       strategyStats: statsObj,
       missedTopics: missedObj,
+      webSourceCapabilities: this.searchPipeline.serializeSourceCapabilities(),
     };
   }
 
@@ -1550,7 +1562,8 @@ export class VaiEngine implements ModelAdapter {
       // Skip if no user-learned content exists
       if (snapshot.learnedEntries.length === 0 &&
           Object.keys(snapshot.strategyStats).length === 0 &&
-          Object.keys(snapshot.missedTopics).length === 0) {
+          Object.keys(snapshot.missedTopics).length === 0 &&
+          (snapshot.webSourceCapabilities?.stats.length ?? 0) === 0) {
         return;
       }
       const dir = dirname(this.persistPath);
@@ -1601,6 +1614,8 @@ export class VaiEngine implements ModelAdapter {
           this.missedTopics.set(k, (this.missedTopics.get(k) ?? 0) + v);
         }
       }
+
+      this.searchPipeline.restoreSourceCapabilities(snapshot.webSourceCapabilities);
 
       const skipSuffix = skippedEntries > 0 ? ` (skipped ${skippedEntries} noisy entries)` : '';
       console.log(`[VaiEngine] Loaded ${loadedEntries} persisted entries from ${this.persistPath}${skipSuffix}`);
@@ -7774,6 +7789,58 @@ export class VaiEngine implements ModelAdapter {
       } as ChatResponse;
     }
 
+    // Execute inspectable constraints before live-context/output routing. The
+    // strict grammar distinguishes simulation from a request for real output.
+    const boundedReasoning = tryBoundedReasoning(userContent, request.messages);
+    if (boundedReasoning) {
+      const durationMs = Math.round(performance.now() - start);
+      this.tracePerf('chat:bounded-reasoning-preflight', userContent, performance.now());
+      this._lastMeta = {
+        strategy: boundedReasoning.strategy,
+        confidence: boundedReasoning.confidence,
+        topicDetected: 'bounded-reasoning',
+        knowledgeDepth: 'deep' as const,
+        responseLength: boundedReasoning.reply.length,
+        durationMs,
+        matchedPattern: boundedReasoning.strategy,
+        trustBadge: 'computed' as const,
+        cognitiveFrame: this._lastCognitiveFrame ?? undefined,
+      };
+      return {
+        message: { content: boundedReasoning.reply, role: 'assistant' as const },
+        finishReason: 'stop' as const,
+        usage: { promptTokens: 0, completionTokens: 0 },
+        durationMs,
+      } as ChatResponse;
+    }
+
+    // A strict formal/code contract that Vai recognizes but cannot fully parse
+    // must not fall through to a high-confidence JSON or JavaScript tutorial.
+    // This is containment, not a solution claim: confidence stays low and the
+    // user gets an inspectable unsupported state.
+    if (isUnsupportedStructuredReasoning(userContent)) {
+      const reply = 'UNSUPPORTED';
+      const durationMs = Math.round(performance.now() - start);
+      this.tracePerf('chat:structured-reasoning-unsupported', userContent, performance.now());
+      this._lastMeta = {
+        strategy: 'structured-reasoning-unsupported',
+        confidence: 0.05,
+        topicDetected: 'structured-reasoning',
+        knowledgeDepth: 'none' as const,
+        responseLength: reply.length,
+        durationMs,
+        matchedPattern: 'recognized-unsupported-structured-contract',
+        trustBadge: 'fallback' as const,
+        cognitiveFrame: this._lastCognitiveFrame ?? undefined,
+      };
+      return {
+        message: { content: reply, role: 'assistant' as const },
+        finishReason: 'stop' as const,
+        usage: { promptTokens: 0, completionTokens: 0 },
+        durationMs,
+      } as ChatResponse;
+    }
+
     const evidenceDisciplinePreflight = tryEmitPrivateLiveContextResponse(userContent)
       ?? tryEmitBridgeCapabilityAudit(userContent);
     if (evidenceDisciplinePreflight) {
@@ -8101,7 +8168,15 @@ export class VaiEngine implements ModelAdapter {
     // OODA Act phase — post-process the response per the trace's decision.
     if (this._lastOodaTrace) {
       const trace: OodaTrace = this._lastOodaTrace;
-      const result = oodaAct(trace, response);
+      // A deterministic parse-and-compute answer (or any strategy that locked
+      // its exact output shape) is not a low-confidence "take" — the topic
+      // ledger's confidence is meaningless for computed results, and a
+      // calibration prefix would corrupt hard format constraints
+      // ("reply with only the number", "exactly one word").
+      const effectiveTrace = this._fastTemplateLock && trace.decide.applyCalibrationPrefix
+        ? { ...trace, decide: { ...trace.decide, applyCalibrationPrefix: false } }
+        : trace;
+      const result = oodaAct(effectiveTrace, response);
       response = result.response;
       this._lastOodaTrace = { ...trace, act: result.act };
       // OODA may have re-attached a "Calibrated take (...)" preamble that
@@ -9204,6 +9279,29 @@ export class VaiEngine implements ModelAdapter {
     // Clear per-request caches — each generateResponse() starts fresh
     this.clearRequestCache();
 
+    // Relational dialogue is a Vai-owned reasoning lane. Run it before compound
+    // splitting and broad retrieval so an introduction with several questions,
+    // or a recall of who said what, stays one coherent conversational turn.
+    const dialogueTurn = tryHandleDialogueTurn({ content: originalInput, history });
+    if (dialogueTurn) {
+      return this.tracked(
+        `dialogue-state:${dialogueTurn.kind}`,
+        dialogueTurn.reply,
+        originalInput,
+        { confidenceOverride: dialogueTurn.confidence },
+      );
+    }
+
+    const selfAssessment = tryEmitVaiSelfAssessment({ content: originalInput, history });
+    if (selfAssessment) {
+      return this.tracked(
+        `vai-self-assessment:${selfAssessment.kind}`,
+        selfAssessment.reply,
+        originalInput,
+        { confidenceOverride: selfAssessment.confidence },
+      );
+    }
+
     // ── Fast-path: deterministic reasoning templates ─────────────────
     // Some prompts (train-catchup, Bayes-with-impossible-evidence) put the
     // downstream search/evaluator pipeline into long-tail timeouts. Detect
@@ -9444,6 +9542,14 @@ export class VaiEngine implements ModelAdapter {
       return this.tracked('literal-response', literalResponse, input);
     }
 
+    // Epistemic contracts must run before topic primers and retrieval. A future
+    // observable cannot be converted into a measured fact by matching a place,
+    // asset, or weather keyword.
+    const earlyUncertaintyGuardrail = this.tryUncertaintyGuardrail(input);
+    if (earlyUncertaintyGuardrail) {
+      return this.tracked('uncertainty-guardrail', earlyUncertaintyGuardrail, input);
+    }
+
     // Strategy -0.2: Benchmark execution mode — honor strict benchmark contracts
     // before generic chat/product strategies can rewrite the prompt.
     const benchmarkEval = this.tryBenchmarkEvalResponse(input, history);
@@ -9463,6 +9569,16 @@ export class VaiEngine implements ModelAdapter {
     const capabilityAnswer = this.tryHandleCapabilityQuestion(input, lower);
     if (capabilityAnswer !== null) {
       return this.tracked('capability', capabilityAnswer, input);
+    }
+
+    // Strategy 0.0: deterministic reasoning solvers — parse-and-compute for
+    // chained arithmetic, inventory tracking, sum/diff puzzles, rule inference,
+    // dependency ordering, JS output prediction, epistemic boundaries, and hard
+    // format constraints. Fires only on a COMPLETE parse; see the module docs.
+    const deterministicAnswer = solveDeterministicReasoning(input);
+    if (deterministicAnswer !== null) {
+      this._fastTemplateLock = true;
+      return this.tracked('deterministic-reasoning', deterministicAnswer, input);
     }
 
     // Strategy 0: Math expressions — evaluate before anything else
@@ -9977,6 +10093,16 @@ export class VaiEngine implements ModelAdapter {
     // Strategy 0.05b: Repo-native architecture — detect system hardening messages and generate memos
     const repoNativeResult = this.tryRepoNativeArchitecture(input, lower, history);
     if (repoNativeResult) return this.tracked('repo-native-architecture', repoNativeResult, input);
+
+    // Reliability invariants outrank generic product/app routing. This lane
+    // composes a durable worker architecture from the requested guarantees.
+    const reliableJobDesign = tryReliableJobDesign(input);
+    if (reliableJobDesign) {
+      return this.tracked('reliable-job-design', reliableJobDesign.reply, input, {
+        confidenceOverride: reliableJobDesign.confidence,
+        matchedPattern: reliableJobDesign.matchedInvariants.join(','),
+      });
+    }
 
     // Strategy 0.055: Official docs lookup — return real docs pages before build/product routing hijacks the prompt
     const officialDocsAnswer = this.tryOfficialDocsAnswer(input, lower);
@@ -10566,6 +10692,11 @@ export class VaiEngine implements ModelAdapter {
     // opinion/decision questions (no pasted error there) so a design question
     // like "how do I not lose the job if a worker crashes?" isn't answered with
     // the generic "read the full error message" checklist.
+    if (/\b(?:function\s+)?[A-Za-z_$][\w$]*\s*<\s*T\s*>\s*\(/.test(input)) {
+      const typedAlgorithm = this.tryAlgorithmCodeGen(input);
+      if (typedAlgorithm) return this.tracked('algorithm-contract', typedAlgorithm, input);
+    }
+
     if (!isOpinionOrDecision) {
       const errorDiagFirst = this.tryErrorDiagnosis(input, lower);
       if (errorDiagFirst) return this.tracked('error-diagnosis', errorDiagFirst, input);
@@ -16199,6 +16330,9 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const context = `${body}\n${history.slice(-6).map((message) => message.content).join('\n')}`;
     const lower = context.toLowerCase();
 
+    const correctedFacts = formatCorrectedCapitalCurrencyFromBody(body);
+    if (correctedFacts) return correctedFacts;
+
     if (/\breturn\s+json\s+only\b/i.test(lower) && /\bkeys?\b/i.test(lower) && /\bid\b/i.test(lower) && /\btask\b/i.test(lower) && /\bdone\b/i.test(lower)) {
       return JSON.stringify({ id: 1, task: 'Sample todo', done: false });
     }
@@ -16209,6 +16343,30 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       && /\b(?:id|task|done|todo)\b/i.test(lower)
     ) {
       return JSON.stringify({ id: 1, task: 'Sample todo', done: false });
+    }
+
+    // Generic small JSON contracts: "JSON only ... risk is high and action is
+    // rollback. Use the keys risk and action." This is deliberately bounded to
+    // explicit key/value language; it is not a free-form JSON generator.
+    if (/\bjson\s+only\b/i.test(body) && /\bkeys?\b/i.test(body)) {
+      const pairs = [...body.matchAll(/\b([a-z][a-z0-9_-]{0,31})\s+(?:is|=)\s+["']?([a-z0-9_.-]+)["']?/gi)];
+      if (pairs.length > 0 && pairs.length <= 8) {
+        const valueOf = (raw: string): string | number | boolean | null => {
+          const value = raw.replace(/[.,;:!?]+$/, '');
+          if (/^(?:true|false)$/i.test(value)) return /^true$/i.test(value);
+          if (/^null$/i.test(value)) return null;
+          if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+          return value;
+        };
+        return JSON.stringify(Object.fromEntries(pairs.map((pair) => [pair[1], valueOf(pair[2])] as const)));
+      }
+    }
+
+    // Literal CSV supplied by the user. Preserve the requested order instead
+    // of substituting a memorized canonical list.
+    const literalCsv = body.match(/\b(?:exact\s+order|comma[-\s]?separated|csv)\b[^:\n]{0,100}:\s*([a-z0-9_-]+(?:\s*,\s*[a-z0-9_-]+){1,12})\s*[.!]?$/i);
+    if (literalCsv && /\b(?:no\s+spaces?|plain|exact\s+order)\b/i.test(body)) {
+      return literalCsv[1].split(',').map((value) => value.trim()).join(',');
     }
 
     if (/\bprimary\s+colou?rs?\b/i.test(lower) && /\b(?:comma[-\s]?separated|csv|no\s+bullets?)\b/i.test(lower)) {
@@ -17278,6 +17436,13 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
 
     // Skip planning/discussion — user is asking for advice about building, not requesting a build
     if (/\b(?:before\s+we\s+build|plan\s+for|how\s+(?:would|should|do)\s+(?:i|we|you)\s+(?:build|create|make)|give\s+me\s+a\s+(?:plan|outline|roadmap|overview)|first.slice\s+plan)\b/i.test(lower)) return null;
+    // "Design the smallest reliable X system; give architecture, failure
+    // handling, metrics, rollout" is a systems-design question, not a request
+    // to scaffold a generic web app.
+    if (
+      /\b(?:design|architect)\b/i.test(lower)
+      && /\b(?:architecture|system|jobs?|queues?|failure\s+handling|reliab|metrics?|rollout|backpressure|idempot)\b/i.test(lower)
+    ) return null;
     // Skip descriptive uses like "I can build quickly" where build is not imperative
     if (/\bi\s+(?:can|could|want\s+to|like\s+to|need\s+to)\s+build\b/i.test(lower)) return null;
     // Skip docs / URL lookups that happen to say "page"
@@ -18047,7 +18212,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
         'What to change first',
         '- Stabilize the release path before redesigning the system. Make one boring deployment path that is repeatable, scripted, and easy to roll back.',
         '- Cut moving parts that do not earn their operational cost. If a service, queue, or environment step is not buying a clear boundary, fold it back into the main path.',
-        '- Then look at architecture where deploy pain keeps pointing to the same boundary. That is where the design is telling you something real.',
+        '- Do not start with a rewrite. Look at architecture only where measured deploy pain keeps pointing to the same boundary; that is where the design is telling you something real.',
         '',
         'What to validate next',
         '- Measure where deploys actually fail: build, config, migrations, startup, or post-deploy verification.',
@@ -24798,6 +24963,11 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
     if (futureYearMatch) {
       const year = Number(futureYearMatch[1]);
       const currentYear = new Date(this._nowMs()).getFullYear();
+      const wantsExactObservedFact = /\b(?:exact|measured|observed|actual|final|closing)\b/i.test(input)
+        && /\b(?:temperature|weather|rainfall|precipitation|price|value|score|result|population|count|measurement|fact)\b/i.test(input);
+      if (year > currentYear && wantsExactObservedFact) {
+        return 'That exact future value has not been observed or measured and cannot be known now. It can only be verified at that time; I should not invent a value. A forecast or estimate closer to the date would still not be a measured fact.';
+      }
       if (year > currentYear && /\b(?:who\s+won|winner|won|gold|champion|results?|final|medal)\b/i.test(input)) {
         return `That event hasn't happened yet, so I don't know the result for ${year}.`;
       }
@@ -25633,8 +25803,17 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
   }
 
   private tryLiteralResponseInstruction(input: string): string | null {
-    const trimmed = input.trim();
+    const trimmed = input.trim().replace(/^control\s+task\s*:\s*/i, '');
     if (trimmed.length === 0) return null;
+
+    // A solver that intentionally abstains may still be given an exact output
+    // contract. Honor that contract outside the solver so route containment is
+    // preserved: the reasoning arm abstains, while the response layer renders
+    // the requested epistemic token instead of replacing it with generic prose.
+    const explicitAbstention = trimmed.match(
+      /\b(?:must\s+abstain|do\s+not\s+(?:calculate|compute|recompute))\b[\s\S]*\b(?:output|return|reply\s+with)\s+(INSUFFICIENT|UNKNOWN|UNDETERMINED)\s+exactly[.!]?$/i,
+    );
+    if (explicitAbstention) return explicitAbstention[1].toUpperCase();
 
     // Output-shape constraints ("reply with exactly N words/tokens/letters")
     // are NOT requests to repeat literal text — bail so the dedicated
@@ -25642,6 +25821,9 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
     if (/\bexactly\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})\s+(?:words?|tokens?|letters?|characters?|chars?|sentences?|lines?|paragraphs?)\b/i.test(trimmed)) {
       return null;
     }
+
+    const exactToken = trimmed.match(/^(?:reply|respond|answer|say)\s+(?:with\s+)?exactly\s+["'`]?([A-Za-z0-9_.:-]{1,80})["'`]?\s+and\s+nothing\s+else[.!]?$/i);
+    if (exactToken) return exactToken[1];
 
     const patterns = [
       /^(?:reply|respond|answer|say)\s+(?:with\s+)?(?:exactly|verbatim)\s+(?:this\s+(?:text|token|word|phrase)\s*)?(?:and\s+nothing\s+else\s*)?:?\s*([\s\S]+)$/i,
@@ -27756,6 +27938,22 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
   // ─── ENTITLEMENT / PRODUCT POLICY HANDLERS ──────────────────────
 
   private tryEntitlementPolicy(lower: string): string | null {
+    // General read-vs-paid-action boundary. Preserve the already-authorized
+    // read surface while enforcing the expensive mutation at the server.
+    const protectedAction = lower.match(/\b(?:press(?:ing)?|click(?:ing)?)\s+(?:the\s+)?(launch|run|export|start|deploy|generate|render)\b/i)?.[1];
+    const hasReadAccess = /\b(?:may|can|allowed\s+to)\s+(?:read|view|inspect)|\b(?:viewer|observer|read access)\b/i.test(lower);
+    const lacksActionAccess = /\b(?:cannot|can'?t)\s+(?:start|launch|run|export|deploy|render)|\b(?:no|without|lacks?)\b[^.?!]{0,50}\bentitlement\b|\bseat\s+cannot\b/i.test(lower);
+    if (protectedAction && hasReadAccess && lacksActionAccess) {
+      const action = protectedAction.charAt(0).toUpperCase() + protectedAction.slice(1);
+      return [
+        `Preserve read and view access to the plan, but block ${action} at a server-side entitlement check.`,
+        `Explain that the seat is not entitled to ${protectedAction} because the ${protectedAction} entitlement is missing, without exposing billing details, and keep the plan intact.`,
+        'Offer a bounded Request approval path to an owner or admin, plus an owner-controlled upgrade path.',
+        'Audit the denied attempt with actor, action, resource, and policy reason.',
+        `Do not begin ${protectedAction} optimistically; authorize before starting any paid work.`,
+      ].join('\n\n');
+    }
+
     // Plan access vs sandbox billing
     if (/\bplans?\b/i.test(lower) && /\b(billing|entitlement|sandbox|launch)\b/i.test(lower) && /\b(view|invited|team member)\b/i.test(lower)) {
       return '**View plans vs launch sandbox — separate entitlements:**\n\n' +
@@ -29378,6 +29576,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
    */
   private tryMath(input: string): string | null {
     const lower = input.toLowerCase();
+    const wantsNumberOnly = /\b(?:return|give|answer)\s+(?:only\s+)?(?:the\s+)?(?:number|digits?)\b|\b(?:number|digits?)\s+only\b/i.test(input);
 
     // ── Unit conversions — "how many km is 50 miles", "convert 100 fahrenheit to celsius" ──
     {
@@ -29462,7 +29661,9 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // Strip conversational wrapping
     let expr = input
       .replace(/^(what\s+is|what's|whats|calculate|compute|solve|how\s+much\s+is|tell\s+me|can\s+you\s+calculate)\s+/i, '')
+      .replace(/[?!.]\s*(?:(?:return|give|answer)\s+(?:only\s+)?(?:the\s+)?(?:number|digits?)|(?:number|digits?)\s+only)\s*[?!.]*$/i, '')
       .replace(/[?!.]+$/, '')
+      .replace(/(\d)\s*[x×]\s*(\d)/gi, '$1*$2')
       .trim();
 
     // Handle "10+10=20" — user stating a math fact. Extract just the expression.
@@ -29594,7 +29795,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
     // Must contain at least one digit and one operator
     if (!/\d/.test(expr)) return null;
-    if (!/[+\-*/%^()]/.test(expr) && !/\*\*/.test(expr) && !/\d\s+(plus|minus|times|divided\s+by)\s/i.test(expr)) return null;
+    if (!/[+\-*/%^()]/.test(expr) && !/\*\*/.test(expr) && !/\d\s+(plus|minus|times|multiplied\s+by|divided\s+by)\s/i.test(expr)) return null;
 
     // Convert word operators to symbols
     expr = expr
@@ -29613,7 +29814,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     if (result === null) return null;
 
     const display = expr.replace(/\*\*/g, '^').replace(/\s+/g, '');
-    return `${display} = **${this.formatNum(result)}**`;
+    return wantsNumberOnly ? this.formatNum(result) : `${display} = **${this.formatNum(result)}**`;
   }
 
   /**

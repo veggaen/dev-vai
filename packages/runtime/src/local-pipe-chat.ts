@@ -7,11 +7,12 @@
  */
 
 import * as net from 'node:net';
+import { PORTS } from '@vai/constants';
 import type { ChatChunk, ChatService } from '@vai/core';
 import type { LocalSteeringWorker } from './steering/local-steering-worker.js';
 
 const DIRECT_HOST = '127.0.0.1';
-const DIRECT_PORT = 48765;
+const DIRECT_PORT = PORTS.directAgent;
 const DEFAULT_DIRECT_TURN_TIMEOUT_MS = 60_000;
 const MIN_DIRECT_TURN_TIMEOUT_MS = 5_000;
 const MAX_DIRECT_TURN_TIMEOUT_MS = 300_000;

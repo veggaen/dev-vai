@@ -26,6 +26,42 @@ describe('classifyChatTurn', () => {
     })).toBe('research');
   });
 
+  it.each(['chat', 'agent', 'builder'] as const)(
+    'classifies venue admission prices as research in %s mode',
+    (mode) => {
+      expect(classifyChatTurn({
+        userContent: 'hello, what is the price of visiting the snow park in oslo the snø and what are their prices?',
+        mode,
+        hasActiveSandbox: mode === 'builder',
+      })).toBe('research');
+    },
+  );
+
+  it.each(['chat', 'agent', 'builder'] as const)(
+    'classifies all practical venue details as research in %s mode',
+    (mode) => {
+      for (const userContent of [
+        'can you find the current menu for the Jafs restaurant closest to Helsfyr?',
+        'what time does the closest Jafs to Helsfyr open?',
+        'how can I phone the nearest Lawsons branch to Trafalgar Square?',
+      ]) {
+        expect(classifyChatTurn({
+          userContent,
+          mode,
+          hasActiveSandbox: false,
+        })).toBe('research');
+      }
+    },
+  );
+
+  it('keeps explicit restaurant-menu app work in the builder lane', () => {
+    expect(classifyChatTurn({
+      userContent: 'Build a restaurant menu app with item cards and prices.',
+      mode: 'builder',
+      hasActiveSandbox: false,
+    })).toBe('builder');
+  });
+
   it('classifies local recommendations as freshness-sensitive research', () => {
     expect(classifyChatTurn({
       userContent: 'what are good resturants in Hommersåk Norway?',

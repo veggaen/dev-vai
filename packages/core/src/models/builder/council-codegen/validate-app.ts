@@ -203,6 +203,43 @@ export function extractClassNames(appTsx: string): string[] {
   return [...names];
 }
 
+const UTILITY_CLASS_RE = /^(?:flex|grid|block|inline(?:-block|-flex|-grid)?|hidden|relative|absolute|fixed|sticky|container|(?:p|m)[trblxy]?-[\w.\[\]-]+|gap-[\w.\[\]-]+|space-[xy]-[\w.\[\]-]+|(?:min-|max-)?[wh]-[\w.\[\]-]+|bg-[\w.\[\]/-]+|text-[\w.\[\]/-]+|font-[\w.-]+|leading-[\w.-]+|tracking-[\w.-]+|rounded(?:-[\w.-]+)?|shadow(?:-[\w.-]+)?|border(?:-[\w./-]+)?|items-[\w.-]+|justify-[\w.-]+|grid-cols-[\w.-]+|col-span-[\w.-]+|row-span-[\w.-]+|overflow-[\w.-]+|object-[\w.-]+|transition(?:-[\w.-]+)?|duration-[\w.-]+)$/i;
+
+function classTokens(appTsx: string): string[] {
+  const tokens = new Set<string>();
+  for (const attr of (appTsx ?? '').matchAll(/className\s*=\s*(?:"([^"]*)"|'([^']*)'|\{((?:[^{}]|\{[^{}]*\})*)\})/g)) {
+    const direct = attr[1] ?? attr[2];
+    const candidates = direct !== undefined
+      ? [direct]
+      : [...(attr[3] ?? '').matchAll(/["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
+    for (const candidate of candidates) {
+      for (const token of candidate.split(/\s+/).filter(Boolean)) {
+        if (/^[A-Za-z][\w:./\[\]-]*$/.test(token)) tokens.add(token);
+      }
+    }
+  }
+  return [...tokens];
+}
+
+/** The generated sandbox has plain CSS, so framework utilities are inert. */
+function checkUtilityClasses(appTsx: string, errors: string[]): void {
+  const utilityClasses = classTokens(appTsx).filter((token) => /^[A-Za-z][\w-]*:/.test(token) || UTILITY_CLASS_RE.test(token));
+  if (utilityClasses.length === 0) return;
+  errors.push(`App.tsx uses utility-framework class names that the plain-CSS sandbox cannot execute (${utilityClasses.slice(0, 10).join(', ')}). Replace them with descriptive kebab-case component classes and let the stylist define every rule.`);
+}
+
+function checkRequestedPersistence(appTsx: string, brief: string | undefined, errors: string[]): void {
+  if (!brief || !/\b(?:persist(?:ent|ence)?|local\s+(?:state|storage)|remember|survive\s+(?:a\s+)?reload)\b/i.test(brief)) return;
+  const hasLocalStorage = /localStorage\s*\.\s*getItem\s*\(/.test(appTsx)
+    && /localStorage\s*\.\s*setItem\s*\(/.test(appTsx);
+  const hasIndexedDb = /\bindexedDB\s*\.\s*open\s*\(/.test(appTsx);
+  if (!hasLocalStorage && !hasIndexedDb) {
+    errors.push('The brief requires persistent local state, but App.tsx never reads and writes browser storage. Initialize state from localStorage (or IndexedDB) and save changes so they survive reloads.');
+  } else if (hasLocalStorage && appTsx.indexOf('localStorage.setItem') < appTsx.indexOf('localStorage.getItem')) {
+    errors.push('App.tsx writes default state to localStorage before reading saved state, so reload overwrites the user’s data. Hydrate in the useState initializer (or read before enabling the save effect).');
+  }
+}
+
 /**
  * Cross-check that App.tsx's classes are actually styled. The common failure
  * is a model emitting Tailwind utility classes (`text-green-600`) into a
@@ -262,6 +299,35 @@ function checkExternalAssets(code: string, fileLabel: string, errors: string[]):
   }
 }
 
+function checkBrokenImagePlaceholders(appTsx: string, errors: string[]): void {
+  if (/<img\b[^>]*\bsrc\s*=\s*(?:["']\s*#?\s*["']|\{\s*["']\s*#?\s*["']\s*\})/i.test(appTsx)
+    || /\b(?:coverImage|imageUrl|imageSrc)\s*:\s*["']\s*#\s*["']/i.test(appTsx)) {
+    errors.push('App.tsx contains an empty or "#" image source, which renders a broken-image icon. Use a self-contained CSS/inline-SVG visual or omit the <img> element.');
+  }
+  if (/<img\b[^>]*\bsrc\s*=\s*\{\s*`data:image\/svg\+xml[^`]*`\s*\}/i.test(appTsx)) {
+    errors.push('App.tsx puts raw SVG markup in an <img> data URL; quoting/encoding can render a broken image. Render inline <svg> markup or a CSS cover element instead.');
+  }
+}
+
+function checkRequestedProgressBounds(appTsx: string, brief: string | undefined, errors: string[]): void {
+  if (!brief || !/\bprogress\b/i.test(brief) || !/\bcurrentPage\b/.test(appTsx) || !/\btotalPages\b/.test(appTsx)) return;
+  const clampsInCode = /Math\s*\.\s*(?:min|max)\s*\(/.test(appTsx);
+  const clampsBothBounds = /Math\s*\.\s*max\s*\([^)]*Math\s*\.\s*min\s*\(/s.test(appTsx)
+    || /Math\s*\.\s*min\s*\([^)]*Math\s*\.\s*max\s*\(/s.test(appTsx);
+  const boundedInput = /\bmax\s*=\s*\{[^}]*totalPages[^}]*\}/.test(appTsx);
+  if (/\bclamp\b/i.test(brief) && !clampsBothBounds) {
+    errors.push('The brief explicitly requires clamping every progress update, but the state update does not clamp both lower and upper bounds with Math.min/Math.max.');
+  } else if (!clampsInCode && !boundedInput) {
+    errors.push('Progress controls update currentPage without clamping to totalPages. Add an input max bound and clamp every state update so progress cannot exceed 100%.');
+  }
+}
+
+function checkFilteredIndexMutation(appTsx: string, errors: string[]): void {
+  if (/\.filter\([\s\S]{0,900}\.map\(\([^,]+,\s*index\)[\s\S]{0,1200}\[index\]\s*\./.test(appTsx)) {
+    errors.push('App.tsx mutates source state by the index of a filtered list. Filtering changes indexes, so edits can update the wrong item; update by a stable id with state.map instead.');
+  }
+}
+
 /** Brace balance that ignores string/template/comment contents — JSX-safe enough as a fallback. */
 function roughlyBalanced(code: string): boolean {
   const stripped = code
@@ -298,6 +364,8 @@ export async function validateGeneratedApp(files: ExtractedAppFiles): Promise<Ap
     if (/```/.test(appTsx)) errors.push('App.tsx contains a leaked markdown fence.');
     checkImports(appTsx, errors);
     checkExternalAssets(appTsx, 'App.tsx', errors);
+    checkBrokenImagePlaceholders(appTsx, errors);
+    checkUtilityClasses(appTsx, errors);
     if (!/useState|useReducer/.test(appTsx)) {
       warnings.push('App.tsx has no state hook — the app may be a static mockup.');
     }
@@ -369,6 +437,8 @@ function checkCssRichness(stylesCss: string, softErrors: string[]): void {
   if (!/:hover|:focus/.test(stylesCss)) misses.push('no :hover/:focus states on interactive elements');
   if (!/font-family/.test(stylesCss)) misses.push('no font-family set (default browser font looks unfinished)');
   if (!/\bbackground(?:-color|-image)?\s*:/.test(stylesCss)) misses.push('no page/background styling');
+  if (!/box-sizing\s*:\s*border-box/.test(stylesCss)) misses.push('no global border-box sizing (padded controls can overflow)');
+  if (!/@media\b/.test(stylesCss)) misses.push('no narrow-screen @media layout');
   if (misses.length > 0) {
     softErrors.push(`The styling is below the visual bar: ${misses.join('; ')}.`);
   }
@@ -492,4 +562,307 @@ function validateHardhat3Lane(
       errors.push('chain/package.json must set "type": "module" for the isolated Hardhat 3 ESM workspace.');
     }
     const scripts = chainPackage.scripts && typeof chainPackage.scripts === 'object' && !Array.isArray(chainPackage.scripts)
-      ? chainPackage.scripts as Record<string, 
+      ? chainPackage.scripts as Record<string, unknown>
+      : {};
+    if (typeof scripts.compile !== 'string' || !/\bhardhat\s+build\b/.test(scripts.compile)) {
+      errors.push('chain/package.json compile must use the Hardhat 3 build command.');
+    }
+    if (typeof scripts['deploy:local'] !== 'string' || !/hardhat\s+ignition\s+deploy[\s\S]*--network\s+localhost/.test(scripts['deploy:local'])) {
+      errors.push('chain/package.json deploy:local must deploy the Ignition module to localhost.');
+    }
+  }
+
+  if (rootPackage && /all\s+using\s+npm\s+--prefix\s+chain/i.test(brief)) {
+    const scripts = rootPackage.scripts && typeof rootPackage.scripts === 'object' && !Array.isArray(rootPackage.scripts)
+      ? rootPackage.scripts as Record<string, unknown>
+      : {};
+    for (const name of ['chain:install', 'chain:compile', 'chain:test', 'chain:node', 'chain:deploy:local']) {
+      if (!brief.includes(name)) continue;
+      if (typeof scripts[name] !== 'string' || !/^npm\s+--prefix\s+(?:\.\/)?chain\b/.test(scripts[name])) {
+        errors.push(`package.json script ${name} must use npm --prefix chain as requested.`);
+      }
+    }
+  }
+
+  if (!/import\s*\{\s*defineConfig\s*\}\s*from\s*["']hardhat\/config["']/.test(config)) {
+    errors.push('chain/hardhat.config.ts must use Hardhat 3 defineConfig().');
+  }
+  if (!/from\s*["']@nomicfoundation\/hardhat-toolbox-viem["']/.test(config) || !/plugins\s*:\s*\[[^\]]+\]/s.test(config)) {
+    errors.push('chain/hardhat.config.ts must import and register hardhat-toolbox-viem in plugins[].');
+  }
+  if (/hardhat\/plugins|\bHardhatUserConfig\b|\bviem\s*:\s*\{/.test(config)) {
+    errors.push('chain/hardhat.config.ts contains Hardhat 2-style or nonexistent plugin configuration.');
+  }
+  if (/localhost/i.test(brief) && (!/localhost\s*:\s*\{[\s\S]*?type\s*:\s*["']http["']/i.test(config) || !/127\.0\.0\.1:8545/.test(config))) {
+    errors.push('chain/hardhat.config.ts localhost must be an explicit Hardhat 3 HTTP network at 127.0.0.1:8545.');
+  }
+  if (/chain\s*id\s*31337/i.test(brief) && !/chainId\s*:\s*31337/.test(config)) {
+    errors.push('chain/hardhat.config.ts must preserve the requested localhost chainId 31337.');
+  }
+
+  if (/without\s+copying\s+(?:its\s+)?logic/i.test(brief)) {
+    if (!/import\s+["']\.\.\/\.\.\/MMM_Unified\.sol["']/.test(entry)) {
+      errors.push('MMM_UnifiedEntry.sol must import ../../MMM_Unified.sol.');
+    }
+    if (/\bcontract\s+[A-Za-z_$][\w$]*/.test(entry)) {
+      errors.push('MMM_UnifiedEntry.sol must remain import-only; declaring a derived copy changes the requested contract surface.');
+    }
+  }
+
+  if (!/buildModule\s*\(/.test(ignition) || !/@nomicfoundation\/hardhat-ignition\/modules/.test(ignition)) {
+    errors.push('chain/ignition/modules/MMM.ts must be a declarative Hardhat Ignition buildModule.');
+  }
+  if (/\bhre\.|\bethers\b|\bclass\s+MMM\s+extends\s+Module/.test(ignition)) {
+    errors.push('chain/ignition/modules/MMM.ts uses an ambient ethers/HRE deployment pattern instead of Hardhat 3 Ignition.');
+  }
+  const contractReference = options.referenceFiles?.find((file) => /(?:^|\/)MMM_Unified\.sol$/i.test(file.path))?.content ?? '';
+  const contractName = contractReference.match(/\bcontract\s+([A-Za-z_$][\w$]*)/)?.[1];
+  if (contractName && !new RegExp(`m\\.contract\\(\\s*["']${contractName}["']`).test(ignition)) {
+    errors.push(`chain/ignition/modules/MMM.ts must deploy the referenced ${contractName} contract.`);
+  }
+
+  if (!/from\s+["']node:test["']/.test(test) || !/\bnetwork\s*\.\s*connect\s*\(/.test(test)) {
+    errors.push('chain/test/MMM_Unified.ts must use the requested Hardhat 3 Node test runner + explicit viem network connection.');
+  }
+  if (/from\s+["']chai["']|\bethers\b|\.receive\s*\(/.test(test)) {
+    errors.push('chain/test/MMM_Unified.ts contains an ethers/Chai or callable receive() pattern incompatible with the requested viem lane.');
+  }
+  if (!/sendTransaction\s*\(/.test(test)) {
+    errors.push('chain/test/MMM_Unified.ts must test payable receive() behavior by sending a transaction to the contract address.');
+  }
+  for (const getter of ['TOTAL_SUPPLY', 'PRE_MINT_AMOUNT', 'PHASE_COUNT', 'MIN_CONTRIBUTION_WEI']) {
+    if (!test.includes(getter)) errors.push(`chain/test/MMM_Unified.ts must verify the real ${getter} getter from MMM_Unified.sol.`);
+  }
+}
+
+export async function validateEditedFiles(
+  emitted: ReadonlyMap<string, string>,
+  allowedPaths: readonly string[],
+  options: ValidateEditOptions = {},
+): Promise<AppValidationReport> {
+  const errors: string[] = [];
+  const softErrors: string[] = [];
+  const warnings: string[] = [];
+  let checker: AppValidationReport['checker'] = 'heuristic';
+  const external = options.external === true;
+  const knownImports = external ? collectKnownImports(options.referenceFiles ?? []) : null;
+  const availablePaths = new Set([
+    ...[...emitted.keys()].map((path) => path.replace(/\\/g, '/')),
+    ...(options.referenceFiles ?? []).map((file) => file.path.replace(/\\/g, '/')),
+  ]);
+  const proposedPackages = new Set<string>();
+  for (const [path, body] of emitted) {
+    if (!/(?:^|\/)package\.json$/i.test(path.replace(/\\/g, '/'))) continue;
+    const parsed = parseJsonObject(body);
+    if (parsed) Object.keys(packageEntries(parsed)).forEach((name) => proposedPackages.add(name));
+  }
+
+  if (emitted.size === 0) {
+    errors.push('No titled file blocks were produced — re-emit each changed file in a fenced block with title="path".');
+  }
+  if (emitted.size > 12) {
+    errors.push(`Edit emits ${emitted.size} files — split the change into a reviewable batch of at most 12 files.`);
+  }
+
+  const allowed = new Set(allowedPaths.map((p) => p.replace(/\\/g, '/')));
+  if (!external) {
+    allowed.add('src/App.tsx');
+    allowed.add('src/styles.css');
+  }
+
+  const ts = await loadTypescript();
+  for (const [path, body] of emitted) {
+    const norm = path.replace(/\\/g, '/');
+    if (!external && SCAFFOLD_OWNED_PATH.test(norm)) {
+      errors.push(`${path} is scaffold-owned — an edit may only change project source files (src/App.tsx, src/styles.css, …).`);
+      continue;
+    }
+    if (!allowed.has(norm)) {
+      const allowedNewFile = external && options.allowNewFiles && isSafeNewProjectFile(norm);
+      if (!allowedNewFile) {
+        errors.push(`${path} is not part of the active project — only re-emit shown files, or safe new source/config files explicitly requested by the user.`);
+        continue;
+      }
+    }
+    if (body.length > 180_000) {
+      errors.push(`${path} is too large for one reviewable edit (${body.length} characters).`);
+      continue;
+    }
+    if (/```/.test(body)) errors.push(`${path} contains a leaked markdown fence.`);
+    if (!external) checkExternalAssets(body, path, errors);
+    if (!external && norm === 'src/App.tsx') {
+      checkUtilityClasses(body, errors);
+      checkRequestedPersistence(body, options.brief, errors);
+      checkBrokenImagePlaceholders(body, errors);
+      checkRequestedProgressBounds(body, options.brief, errors);
+      checkFilteredIndexMutation(body, errors);
+    }
+
+    if (/\.json$/i.test(norm)) {
+      let parsed: Record<string, unknown> | null = null;
+      if (/(?:^|\/)tsconfig[^/]*\.json$/i.test(norm) && ts) {
+        const result = ts.parseConfigFileTextToJson(path, body);
+        if (result.error) {
+          errors.push(`${path} is invalid JSON/JSONC — ${ts.flattenDiagnosticMessageText(result.error.messageText, ' ')}`);
+        } else if (result.config && typeof result.config === 'object') {
+          parsed = result.config as Record<string, unknown>;
+        }
+      } else {
+        try {
+          const value = JSON.parse(body) as unknown;
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            errors.push(`${path} must contain a JSON object.`);
+          } else {
+            parsed = value as Record<string, unknown>;
+          }
+        } catch (error) {
+          errors.push(`${path} is invalid JSON — ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      if (parsed && /(?:^|\/)package\.json$/i.test(norm)) {
+        const sections = ['dependencies', 'devDependencies'] as const;
+        const packages = Object.assign(
+          {},
+          ...sections.map((section) => {
+            const value = parsed![section];
+            return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+          }),
+        ) as Record<string, unknown>;
+        const storybookMajors = new Map<string, number>();
+        for (const [name, version] of Object.entries(packages)) {
+          if (!/^@storybook\/(?:react|addons|addon-)/.test(name) || typeof version !== 'string') continue;
+          const major = version.match(/\d+/)?.[0];
+          if (major) storybookMajors.set(name, Number(major));
+        }
+        if (new Set(storybookMajors.values()).size > 1) {
+          errors.push(`${path} mixes Storybook major versions (${[...storybookMajors.entries()].map(([name, major]) => `${name}@${major}`).join(', ')}). Keep core and add-ons on one compatible major.`);
+        }
+
+        if (!options.allowConfigKeyRemoval) {
+          const original = options.referenceFiles?.find((file) => file.path.replace(/\\/g, '/') === norm)?.content;
+          if (original) {
+            try {
+              const before = JSON.parse(original) as Record<string, unknown>;
+              const removedTopLevel = Object.keys(before).filter((key) => !(key in parsed!));
+              if (removedTopLevel.length > 0) {
+                errors.push(`${path} removes existing top-level key(s) without an explicit remove request: ${removedTopLevel.join(', ')}.`);
+              }
+              const beforeScripts = before.scripts && typeof before.scripts === 'object' && !Array.isArray(before.scripts)
+                ? before.scripts as Record<string, unknown>
+                : {};
+              const afterScripts = parsed.scripts && typeof parsed.scripts === 'object' && !Array.isArray(parsed.scripts)
+                ? parsed.scripts as Record<string, unknown>
+                : {};
+              const removedScripts = Object.keys(beforeScripts).filter((key) => !(key in afterScripts));
+              if (removedScripts.length > 0) {
+                errors.push(`${path} removes existing script(s) without an explicit remove request: ${removedScripts.join(', ')}.`);
+              }
+              for (const section of ['dependencies', 'devDependencies'] as const) {
+                const beforeEntries = before[section] && typeof before[section] === 'object' && !Array.isArray(before[section])
+                  ? before[section] as Record<string, unknown>
+                  : {};
+                const afterEntries = parsed[section] && typeof parsed[section] === 'object' && !Array.isArray(parsed[section])
+                  ? parsed[section] as Record<string, unknown>
+                  : {};
+                const removed = Object.keys(beforeEntries).filter((key) => !(key in afterEntries));
+                if (removed.length > 0) {
+                  errors.push(`${path} removes existing ${section} entries without an explicit remove request: ${removed.join(', ')}.`);
+                }
+              }
+            } catch {
+              // The original project snapshot is trusted as the user's source;
+              // if it is non-standard JSON we still validate the emitted file.
+            }
+          }
+        }
+      }
+    }
+
+    if (/\.(?:tsx|ts)$/i.test(norm)) {
+      for (const match of body.matchAll(/^\s*import\s+(?:[^;'"]+from\s+)?['"]([^'"]+)['"]/gm)) {
+        const source = match[1] ?? '';
+        if (source.startsWith('./') || source.startsWith('../')) {
+          if (!relativeModuleExists(norm, source, availablePaths)) {
+            errors.push(`${path} imports missing local module "${source}".`);
+          }
+          continue;
+        }
+        if (source.startsWith('@/')) continue;
+        if (external) {
+          // Real projects have real dependency trees. Only flag imports the
+          // project has never used anywhere — and softly, not blocking: the
+          // package may be installed but absent from the snapshots we saw.
+          const packageName = source.startsWith('@') ? source.split('/').slice(0, 2).join('/') : source.split('/')[0];
+          if (knownImports && !knownImports.has(source) && !proposedPackages.has(packageName)) {
+            softErrors.push(`${path} adds a new import "${source}" — confirm the package is installed.`);
+          }
+          continue;
+        }
+        if (source !== 'react') {
+          errors.push(`${path} imports "${source}" — only 'react' and local project files are available.`);
+        }
+      }
+      if (ts) {
+        checker = 'tsc';
+        const fileName = norm.split('/').pop() ?? 'App.tsx';
+        const result = ts.transpileModule(body, {
+          reportDiagnostics: true,
+          compilerOptions: {
+            jsx: ts.JsxEmit.ReactJSX,
+            target: ts.ScriptTarget.ES2020,
+            module: ts.ModuleKind.ESNext,
+          },
+          fileName,
+        });
+        let sawSyntaxError = false;
+        for (const diag of result.diagnostics ?? []) {
+          if (diag.category !== ts.DiagnosticCategory.Error) continue;
+          sawSyntaxError = true;
+          const message = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
+          const line = diag.file && diag.start !== undefined
+            ? `:${diag.file.getLineAndCharacterOfPosition(diag.start).line + 1}`
+            : '';
+          errors.push(`${path}${line} — ${message}`);
+          if (errors.length >= 8) break;
+        }
+        if (!sawSyntaxError && !external) {
+          // Semantic pass resolves against OUR hoisted @types/react — meaningless
+          // for external projects with their own dependency trees; syntax + fence
+          // + truncation checks still guard those.
+          try {
+            errors.push(...semanticErrors(ts, body, fileName).map((e) => e.replace(fileName, path)));
+          } catch {
+            // best-effort; never block the turn on the checker itself
+          }
+        }
+      } else if (!roughlyBalanced(body)) {
+        errors.push(`${path} braces look unbalanced — likely truncated output.`);
+      }
+    } else if (/\.css$/i.test(norm)) {
+      const opens = (body.match(/\{/g) ?? []).length;
+      const closes = (body.match(/\}/g) ?? []).length;
+      if (opens !== closes) errors.push(`${path} braces are unbalanced (${opens} "{" vs ${closes} "}") — likely truncated output.`);
+    } else if (/\.sol$/i.test(norm)) {
+      if (!/^\s*\/\/\s*SPDX-License-Identifier:/m.test(body)) warnings.push(`${path} has no SPDX license identifier.`);
+      if (!/^\s*pragma\s+solidity\s+[^;]+;/m.test(body)) errors.push(`${path} has no complete Solidity pragma.`);
+      const importOnlyRequested = /without\s+copying\s+(?:its\s+)?logic/i.test(options.brief ?? '')
+        && /^\s*import\s+["'][^"']+\.sol["']\s*;/m.test(body);
+      if (!importOnlyRequested && !/\b(?:contract|abstract\s+contract|interface|library)\s+[A-Za-z_$][\w$]*/.test(body)) {
+        errors.push(`${path} has no Solidity contract, interface, or library declaration.`);
+      }
+      if (!roughlyBalanced(body)) errors.push(`${path} braces look unbalanced — likely truncated Solidity output.`);
+    }
+  }
+
+  const app = emitted.get('src/App.tsx');
+  const css = emitted.get('src/styles.css');
+  if (app && css) {
+    checkCssCoverage(app, css, errors, softErrors, warnings);
+    checkCssRichness(css, softErrors);
+  }
+
+  validateHardhat3Lane(emitted, options, errors);
+
+  return { ok: errors.length === 0, errors, softErrors, warnings, checker };
+}

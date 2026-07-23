@@ -14,6 +14,11 @@ import { getSidebarNavItem, getSidebarPanelTitle } from '../lib/sidebar-nav.js';
 import { toast } from 'sonner';
 import { SidebarPanelHeader } from './sidebar/SidebarPrimitives.js';
 import { useChatMergeDrag } from './sidebar/ChatMergeDrag.js';
+import { SharedWorkTask } from './sidebar/SharedWorkTask.js';
+import {
+  fetchLatestSharedWorkArtifact,
+  type SharedWorkArtifact,
+} from '../lib/shared-work-artifact.js';
 
 const SessionList = lazy(async () => ({ default: (await import('./SessionList.js')).SessionList }));
 const DockerPanel = lazy(async () => ({ default: (await import('./DockerPanel.js')).DockerPanel }));
@@ -206,6 +211,8 @@ function ChatsPanel() {
   const themePreference = useLayoutStore((state) => state.themePreference);
   const isLight = themePreference === 'light';
   const streamingConversationId = useChatStore((state) => state.streamingConversationId);
+  const messageCount = useChatStore((state) => state.messages.length);
+  const [sharedTask, setSharedTask] = useState<SharedWorkArtifact | null>(null);
   const [query, setQuery] = useState('');
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => loadPinnedChats());
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => loadIdSet(CHAT_ARCHIVED_STORAGE_KEY));
@@ -217,8 +224,30 @@ function ChatsPanel() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [draggedConversationId, setDraggedConversationId] = useState<string | null>(null);
   const [dragOverConversationId, setDragOverConversationId] = useState<string | null>(null);
+  // Two-stage delete: first click arms, second click (within the window) deletes.
+  // A single stray click can no longer permanently destroy a conversation.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const confirmDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressSelectUntilRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const requestDelete = useCallback((conversationId: string): boolean => {
+    if (confirmDeleteTimerRef.current) {
+      clearTimeout(confirmDeleteTimerRef.current);
+      confirmDeleteTimerRef.current = null;
+    }
+    if (confirmingDeleteId === conversationId) {
+      setConfirmingDeleteId(null);
+      return true;
+    }
+    setConfirmingDeleteId(conversationId);
+    confirmDeleteTimerRef.current = setTimeout(() => setConfirmingDeleteId(null), 3000);
+    return false;
+  }, [confirmingDeleteId]);
+
+  useEffect(() => () => {
+    if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const focusSearch = () => {
@@ -232,6 +261,22 @@ function ChatsPanel() {
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!activeConversationId) {
+      setSharedTask(null);
+      return () => controller.abort();
+    }
+
+    void fetchLatestSharedWorkArtifact(activeConversationId, controller.signal)
+      .then((artifact) => setSharedTask(artifact))
+      .catch(() => {
+        if (!controller.signal.aborted) setSharedTask(null);
+      });
+
+    return () => controller.abort();
+  }, [activeConversationId, messageCount, streamingConversationId]);
 
   useEffect(() => {
     setManualOrder((previous) => {
@@ -452,6 +497,8 @@ function ChatsPanel() {
         </div>
       </div>
 
+      {sharedTask && <SharedWorkTask artifact={sharedTask} />}
+
       {/* Grouped conversation list */}
       <div className="px-1.5 pb-2">
         {visibleGroups.map((group) => {
@@ -638,15 +685,24 @@ function ChatsPanel() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    deleteConversation(conv.id);
+                    if (requestDelete(conv.id)) void deleteConversation(conv.id);
+                  }}
+                  onMouseLeave={() => {
+                    if (confirmingDeleteId === conv.id) setConfirmingDeleteId(null);
                   }}
                   draggable={false}
-                  aria-label={`Delete ${conv.title}`}
-                  className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded opacity-0 transition-all group-hover:opacity-100 ${
-                    isLight ? 'text-zinc-400 hover:bg-red-50 hover:text-red-500' : 'text-zinc-600 hover:bg-red-500/10 hover:text-red-400'
+                  aria-label={confirmingDeleteId === conv.id ? `Confirm delete ${conv.title}` : `Delete ${conv.title}`}
+                  title={confirmingDeleteId === conv.id ? 'Click again to delete' : 'Delete'}
+                  className={`flex h-5 flex-shrink-0 items-center justify-center rounded transition-all group-hover:opacity-100 ${
+                    confirmingDeleteId === conv.id
+                      ? `w-auto gap-1 px-1.5 opacity-100 ${isLight ? 'bg-red-50 text-red-600' : 'bg-red-500/15 text-red-400'}`
+                      : `w-5 opacity-0 ${isLight ? 'text-zinc-400 hover:bg-red-50 hover:text-red-500' : 'text-zinc-600 hover:bg-red-500/10 hover:text-red-400'}`
                   }`}
                 >
                   <Trash2 className="h-3 w-3" />
+                  {confirmingDeleteId === conv.id && (
+                    <span className="text-[10px] font-medium leading-none">Sure?</span>
+                  )}
                 </button>
               </div>
               );
@@ -704,12 +760,20 @@ function ChatsPanel() {
             </button>
             <div className={`my-1 h-px ${isLight ? 'bg-zinc-200' : 'bg-white/10'}`} />
             <button
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors ${
-                isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10'
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] font-medium transition-colors ${
+                confirmingDeleteId === conv.id
+                  ? isLight ? 'bg-red-50 text-red-700' : 'bg-red-500/15 text-red-300'
+                  : isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10'
               }`}
-              onClick={() => { void deleteConversation(conv.id); setContextMenu(null); }}
+              onClick={() => {
+                if (requestDelete(conv.id)) {
+                  void deleteConversation(conv.id);
+                  setContextMenu(null);
+                }
+              }}
             >
-              <Trash2 className="h-3.5 w-3.5" /> Delete
+              <Trash2 className="h-3.5 w-3.5" />
+              {confirmingDeleteId === conv.id ? 'Click again to confirm' : 'Delete'}
             </button>
           </div>
         );

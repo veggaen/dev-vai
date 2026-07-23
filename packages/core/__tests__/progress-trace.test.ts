@@ -4,8 +4,8 @@ import {
   serializeProgressTrace,
   deserializeProgressTrace,
   TRACE_BLOB_MAX,
+  type ChatProgressStep,
 } from '../src/chat/progress-trace.js';
-import type { ChatProgressStep } from '@vai/api-types/chat-ws';
 
 const step = (over: Partial<ChatProgressStep> = {}): ChatProgressStep => ({
   stage: 'council-vai-round-1',
@@ -100,4 +100,16 @@ describe('serialize/deserialize round-trip', () => {
   });
 
   it('returns undefined for empty / null / corrupt input', () => {
-    expec
+    expect(serializeProgressTrace([])).toBeUndefined();
+    expect(serializeProgressTrace(undefined)).toBeUndefined();
+    expect(deserializeProgressTrace(null)).toBeUndefined();
+    expect(deserializeProgressTrace('')).toBeUndefined();
+    expect(deserializeProgressTrace('{not json')).toBeUndefined();
+    expect(deserializeProgressTrace('[]')).toBeUndefined();
+    expect(deserializeProgressTrace('[{"junk":1}]')).toBeUndefined(); // no stage/label/status
+  });
+
+  it('refuses legacy traces whose row ownership cannot be trusted', () => {
+    expect(deserializeProgressTrace(JSON.stringify([step({ stage: 'legacy' })]))).toBeUndefined();
+  });
+});

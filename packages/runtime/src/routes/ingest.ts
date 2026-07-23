@@ -18,7 +18,7 @@ import {
   discoverBodySchema,
   ingestGitHubDeepBodySchema,
   ingestUrlBodySchema,
-} from '@vai/api-types/ingest';
+} from '@vai/contracts/ingest';
 import { invalidRequestBody } from '../validation/http-validation.js';
 import { hasTrustedCaptureAccess } from '../security/request-trust.js';
 

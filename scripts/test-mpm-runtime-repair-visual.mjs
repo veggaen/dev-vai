@@ -227,3 +227,12 @@ try {
   console.log(`\n${passed}/${results.length} checks passed. Evidence: ${outDir}`);
   await sleep(8000);
 } finally {
+  if (!success && appliedRevision) {
+    const reverted = await api(`/api/sandbox/${project.id}/revisions/${appliedRevision.id}/revert`, { method: 'POST', body: '{}' }).catch(() => ({ ok: false }));
+    const restored = reverted.ok && TARGETS.every((path) => readFileSync(join(ROOT, path), 'utf-8') === beforeFiles.get(path));
+    log('Failed repair reverted byte-for-byte', restored);
+  }
+  await browser.close();
+}
+
+if (!success) process.exitCode = 1;

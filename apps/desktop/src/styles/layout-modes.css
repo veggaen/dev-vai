@@ -116,6 +116,13 @@
   content: none;
 }
 
+/* The command bar sits on the page like a running head: hairline below,
+   no floating chrome. */
+[data-layout-mode="open"] .top-command-bar {
+  border-bottom: 1px solid color-mix(in oklab, var(--fg) 6%, transparent);
+  background: color-mix(in oklab, var(--fg) 1%, transparent);
+}
+
 /* The margin rule — one static hairline marking the reading column. */
 [data-layout-mode="open"] #layout-root::before {
   content: '';
@@ -183,6 +190,35 @@
 /* Starfield canvas retired with the aurora deck — the stage holds still. */
 .odyssey-starfield {
   display: none;
+}
+
+/* ── Odyssey sidebar slide-over — the list visits the stage, it doesn't
+      move in. Glass panel floating above the scrim; the stage keeps its
+      full width underneath. ─────────────────────────────────────────────── */
+
+[data-layout-mode="odyssey"] .odyssey-sidebar-overlay {
+  border-radius: var(--layout-radius, 20px);
+  background: color-mix(in oklab, var(--panel) 90%, transparent);
+  border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 32px 80px -24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+[data-theme="light"][data-layout-mode="odyssey"] .odyssey-sidebar-overlay {
+  background: color-mix(in oklab, white 88%, transparent);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.12),
+    0 32px 80px -24px rgba(15, 23, 42, 0.28);
+}
+
+[data-layout-mode="odyssey"] .odyssey-sidebar-overlay .sidebar-panel-shell {
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -418,4 +454,3 @@
     animation: none !important;
   }
 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

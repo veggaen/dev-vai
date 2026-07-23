@@ -39,6 +39,8 @@ export interface SttSession {
 
 export interface SttStartOptions {
   readonly lang?: string;
+  /** Pin the STT model tier for latency-critical callers such as global game PTT. */
+  readonly quality?: 'fast' | 'balanced' | 'best';
   /** Called as interim/final transcripts arrive, so the UI can show live text. */
   readonly onPartial?: (partial: SttPartial) => void;
   /**

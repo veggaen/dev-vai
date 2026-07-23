@@ -1,5 +1,5 @@
 /**
- * GlobalDictationOverlay — the visible half of Win+Alt-anywhere dictation.
+ * GlobalDictationOverlay — the visible half of OS-global dictation.
  *
  * Three surfaces, all transform/opacity-animated and reduced-motion-safe:
  *  - a floating pill while listening (live interim words) / transcribing;
@@ -104,11 +104,9 @@ export function GlobalDictationOverlay({ phase, onDismiss }: GlobalDictationOver
             <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-[color:var(--chat-surface,#17171d)]/95 px-4 py-2 shadow-xl backdrop-blur-xl">
               <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
               <span className="text-[13px] text-[color:var(--chat-body,#d4d4d8)]">
-                {phase.via === 'type'
-                  ? 'Typed into the game — it\u2019s on your clipboard too'
-                  : phase.via === 'clipboard'
-                    ? 'Copied — this app blocks typing, press Ctrl+V to paste'
-                    : 'Pasted — it\u2019s on your clipboard too'}
+                {phase.via === 'clipboard'
+                  ? 'Transcript ready — focus a text field and press Ctrl+V'
+                  : 'Paste input sent'}
               </span>
             </div>
           </motion.div>

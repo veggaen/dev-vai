@@ -31,7 +31,7 @@ interface Command {
 
 const COMMANDS: readonly Command[] = [
   { id: 'new', label: 'New chat', hint: 'Ctrl+N', Icon: MessageSquarePlus, event: 'vai:new-chat' },
-  { id: 'dictate', label: 'Dictate', hint: 'Hold Ctrl+Shift+Space', Icon: Mic, event: 'vai:start-dictation' },
+  { id: 'dictate', label: 'Dictate', hint: 'Hold Win+Alt', Icon: Mic, event: 'vai:start-dictation' },
   { id: 'workspace', label: 'Open workspace', hint: 'Ctrl+Shift+O', Icon: FolderGit2, event: 'vai:open-workspace' },
   { id: 'themes', label: 'Themes', Icon: Palette, event: 'vai:open-themes' },
   { id: 'voice', label: 'Voice settings', Icon: Settings, event: 'vai:open-voice-settings' },

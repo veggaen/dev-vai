@@ -1,9 +1,29 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createDb } from '../src/db/client.js';
-import { ChatService, shouldRunFallbackCouncilReview } from '../src/chat/service.js';
+import {
+  ChatService,
+  prioritizeBuilderCouncilMemberIds,
+  resolveFallbackOwnershipLabel,
+  shouldResumeCouncilProposal,
+  shouldUseImageGenerationForTurn,
+  isActiveProjectExecutionTurn,
+  shouldRunFallbackCouncilReview,
+} from '../src/chat/service.js';
 import { ModelRegistry } from '../src/models/adapter.js';
 import type { ModelAdapter, ChatRequest, ChatResponse, ChatChunk } from '../src/models/adapter.js';
 import type { VaiDatabase } from '../src/db/client.js';
+import type { SearchResponse } from '../src/search/types.js';
+
+const WITHHELD_PROPOSAL = {
+  schemaVersion: 1 as const,
+  projectName: 'book-tracker',
+  brief: 'Redesign the Book Tracker as an editorial reading room.',
+  files: [{ path: 'src/App.tsx', content: 'export default function App() { return null; }' }],
+  validation: { ok: true, errors: [], softErrors: [], warnings: [], checker: 'tsc' as const },
+  reviews: [],
+  repairsUsed: 2,
+  memberIds: ['local:qwen2.5-coder:7b'],
+};
 
 class MockAdapter implements ModelAdapter {
   readonly id = 'mock:test';
@@ -98,6 +118,70 @@ class SequencedStreamAdapter implements ModelAdapter {
 }
 
 describe('ChatService', () => {
+  it('puts a code-specialist seat first for builder implementation', () => {
+    expect(prioritizeBuilderCouncilMemberIds([
+      'local:qwen3:8b',
+      'local:deepseek-r1:8b',
+      'local:qwen2.5-coder:7b',
+    ])).toEqual([
+      'local:qwen2.5-coder:7b',
+      'local:qwen3:8b',
+      'local:deepseek-r1:8b',
+    ]);
+  });
+
+  it('resumes a withheld proposal only for an explicit continuation or exact retry', () => {
+    expect(shouldResumeCouncilProposal(
+      'Retry the withheld Book Tracker edit and fix the remaining issues.',
+      WITHHELD_PROPOSAL,
+    )).toBe(true);
+    expect(shouldResumeCouncilProposal(WITHHELD_PROPOSAL.brief, WITHHELD_PROPOSAL)).toBe(true);
+    expect(shouldResumeCouncilProposal(
+      'Add an export button to the Book Tracker.',
+      WITHHELD_PROPOSAL,
+    )).toBe(false);
+  });
+
+  it('keeps active-project image and SVG requests in the software edit lane', () => {
+    const content = 'Repair the active project and apply it. Replace empty SVG images with visible inline artwork.';
+    expect(shouldUseImageGenerationForTurn({
+      wantsImage: true,
+      explicitImageMode: false,
+      hasActiveSandbox: true,
+      content,
+    })).toBe(false);
+    expect(shouldUseImageGenerationForTurn({
+      wantsImage: true,
+      explicitImageMode: true,
+      hasActiveSandbox: true,
+      content,
+    })).toBe(true);
+  });
+
+  it('makes an explicit active-project fix authoritative over research-like book titles', () => {
+    const content = 'Fix the Book Tracker and apply the edit. Make 1984 show an eye and The Great Gatsby show a skyline.';
+    expect(isActiveProjectExecutionTurn(true, content)).toBe(true);
+    expect(isActiveProjectExecutionTurn(false, content)).toBe(false);
+  });
+
+  it('does not announce the generic fallback as owner when Council produced the build', () => {
+    expect(resolveFallbackOwnershipLabel({
+      fallbackLabel: 'qwen3:8b',
+      councilOwnsResult: true,
+      councilGenerationStarted: true,
+      primaryFlip: true,
+      councilEscalated: false,
+    })).toBeNull();
+
+    expect(resolveFallbackOwnershipLabel({
+      fallbackLabel: 'qwen3:8b',
+      councilOwnsResult: false,
+      councilGenerationStarted: true,
+      primaryFlip: true,
+      councilEscalated: false,
+    })).toBe('Council could not complete the build — handing to qwen3:8b');
+  });
+
   let db: VaiDatabase;
   let chatService: ChatService;
   let adapter: MockAdapter;
@@ -318,6 +402,81 @@ describe('ChatService', () => {
     expect(answer).toContain('+47 51 62 74 00');
     expect(fallback.streamCalls).toBe(0);
     expect(chunks.some((chunk) => chunk.type === 'sources' && chunk.sources?.length === 1)).toBe(true);
+  });
+
+  it('retries one incomplete venue-detail search and ships the verified deterministic result', async () => {
+    const registry = new ModelRegistry();
+    const primary = new MockAdapter();
+    registry.register(primary);
+    let searchCalls = 0;
+    const searchResult: SearchResponse = {
+      answer: '**Opening hours:** [1]\n\nMandag – Fredag 05.00-18.00\nLørdag 05.00-17.00',
+      sources: [{
+        text: 'BRYGGE BAKER’N. Åpningstid: Mandag – Fredag 05.00-18.00. Lørdag 05.00-17.00.',
+        url: 'https://www.bryggensenter.no/butikkoversikt/',
+        domain: 'bryggensenter.no',
+        title: 'Butikkoversikt - Bryggen Senter',
+        favicon: '',
+        trust: { tier: 'high', score: 0.82, reason: 'First-party venue domain/title match' },
+        rank: 4,
+      }],
+      plan: {
+        originalQuery: 'when does the bakery on hommersåk open up? brygge bakeren',
+        intent: 'venue-hours',
+        entities: ['brygge bakeren'],
+        constraints: {},
+        fanOutQueries: ['Brygge Bakeren opening hours'],
+      },
+      rawResultCount: 1,
+      confidence: 0.82,
+      durationMs: 10,
+      sync: {
+        state: 'linear',
+        latencyMs: 10,
+        recommendedConcurrency: 1,
+        medianLatencyMs: 10,
+        p95LatencyMs: 10,
+        observations: 1,
+      },
+      audit: [],
+    };
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      searchForEvidence: async () => {
+        searchCalls += 1;
+        return searchCalls === 1
+          ? {
+            ...searchResult,
+            answer: 'I searched for the hours but found only a thin listing.',
+            sources: searchResult.sources.map((source) => ({
+              ...source,
+              url: 'https://directory.example/brygge-bakeren',
+              domain: 'directory.example',
+              trust: { tier: 'low', score: 0.35, reason: 'Unverified directory' },
+            })),
+          }
+          : searchResult;
+      },
+    });
+    const convId = svc.createConversation('mock:test', 'Venue retry', 'chat');
+    const chunks: ChatChunk[] = [];
+
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'when does the bakery on hommersåk open up? brygge bakeren',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const answer = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(searchCalls).toBe(2);
+    expect(answer).toContain('05.00-18.00');
+    expect(answer).not.toContain('19.00');
+    expect(chunks.some((chunk) => chunk.type === 'sources'
+      && chunk.sources?.[0]?.url.includes('bryggensenter.no/butikkoversikt'))).toBe(true);
+    expect(primary.lastStreamRequest).toBeUndefined();
   });
 
   it('keeps sourced contact research for an explicit online correction instead of escalating to a friend', async () => {
@@ -1631,4 +1790,59 @@ describe('ChatService', () => {
         responseDepth: 'deep-design-memo',
       },
     )) {
-      /
+      // consume
+    }
+
+    const systemText = adapter.lastStreamRequest?.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n\n') ?? '';
+
+    expect(systemText).toMatch(/Hardening profile: strict/i);
+    expect(systemText).toMatch(/Requested response depth: deep-design-memo/i);
+    expect(systemText).toMatch(/Respond with a deeper design memo/i);
+    expect(systemText).toMatch(/Use a rigid sectioned memo with explicit headings and no preamble/i);
+    expect(systemText).toMatch(/Do not add an executive summary, Idea, Overview/i);
+    expect(systemText).toMatch(/use exactly these section headings in this order: Inputs, Signals, Prediction loop, Working set, Guardrails, Metrics, Rollout, Failure modes/i);
+  });
+
+  it('auto-creates and emits conversation_resolved instead of throwing for unknown ids', async () => {
+    // Auto-create now provides race recovery; the only way it can still throw
+    // is if the fallback model adapter itself isn't registered.
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const chunks: ChatChunk[] = [];
+      for await (const chunk of chatService.sendMessage(
+        'nonexistent',
+        'Hi',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { fallbackModelId: 'mock:test' },
+      )) {
+        chunks.push(chunk);
+      }
+      expect(chunks.find((c) => c.type === 'conversation_resolved')).toBeDefined();
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  it('deletes a conversation and its messages', async () => {
+    const convId = chatService.createConversation('mock:test');
+
+    for await (const _chunk of chatService.sendMessage(convId, 'Hi')) {
+      // consume
+    }
+
+    chatService.deleteConversation(convId);
+
+    const list = chatService.listConversations();
+    expect(list).toHaveLength(0);
+
+    const msgs = chatService.getMessages(convId);
+    expect(msgs).toHaveLength(0);
+  });
+});

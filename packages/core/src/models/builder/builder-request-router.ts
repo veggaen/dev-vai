@@ -158,4 +158,7 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
     kind: 'non-builder',
     confidence: 0.54,
     reasons: ['No strong fresh-build or active-edit signal.'],
-    shouldGenerateFreshBuild: false,
+    shouldGenerateFreshBuild: false,
+    shouldPatchActiveSandbox: false,
+  };
+}

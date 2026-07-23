@@ -316,4 +316,3 @@ export function MarkdownRenderer({ content, className = '', codeVisibility = 'sh
     </div>
   );
 }
-        

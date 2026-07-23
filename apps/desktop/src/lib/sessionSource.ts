@@ -1,4 +1,4 @@
-import type { AgentSession } from '@vai/core/browser';
+import type { AgentSession } from '@vai/contracts/session-models';
 
 export type SessionSourceFilter =
   | 'all'

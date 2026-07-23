@@ -5,7 +5,7 @@ import type {
   GlobalCompanionClient,
   ProjectCompanionClient,
   ProjectPeerResponse,
-} from '@vai/api-types/project-responses';
+} from '@vai/contracts/project-responses';
 
 export type CompanionClientSummary = GlobalCompanionClient;
 export type ProjectClientSummary = ProjectCompanionClient;

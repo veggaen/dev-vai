@@ -11,7 +11,7 @@ import {
   projectPeersBodySchema,
   projectShareLinkBodySchema,
   submitProjectAuditResultBodySchema,
-} from '@vai/api-types/projects';
+} from '@vai/contracts/projects';
 import { invalidRequestBody } from '../validation/http-validation.js';
 
 type AuthenticatedViewer = PlatformViewer & {

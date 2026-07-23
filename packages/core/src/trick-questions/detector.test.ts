@@ -299,6 +299,26 @@ describe('detectTrickQuestion (full dispatch)', () => {
   });
 });
 
+describe('general bounded trick reasoning', () => {
+  test.each([
+    ['A bat and ball cost $1.10 total. The bat costs $1 more than the ball. How many cents does the ball cost?', /5 cents.*\$1\.05.*\$0\.05.*\$1\.10/i],
+    ['A book and pen cost $2.40 together. The book costs $2.00 more than the pen. How many cents is the pen?', /20 cents.*\$2\.20.*\$0\.20.*\$2\.40/i],
+    ['A lamp and bulb cost $3.30 total. The lamp costs $3.00 more than the bulb. What does the bulb cost in cents?', /15 cents.*\$3\.15.*\$0\.15.*\$3\.30/i],
+    ['A headset and cable cost 4 dollars and 60 cents total. The headset costs 4 dollars more than the cable. What does the cable cost in cents?', /30 cents.*\$4\.30.*\$0\.30.*\$4\.60/i],
+    ['The mug and lid cost 90 cents together. The mug costs 50 cents more than the lid. What does the lid cost?', /20 cents.*\$0\.70.*\$0\.20.*\$0\.90.*\$0\.50/i],
+  ])('solves paired-cost algebra from the supplied values: %s', (prompt, expected) => {
+    const result = detectTrickQuestion(prompt);
+    expect(result?.kind).toBe('anchoring-trap');
+    expect(result?.answer).toMatch(expected);
+  });
+
+  test('answers the inclusive month-day question without falling for February', () => {
+    const result = detectTrickQuestion('How many months have 28 days?');
+    expect(result?.kind).toBe('calendar-inclusion');
+    expect(result?.answer).toBe('12. Every month has at least 28 days.');
+  });
+});
+
 // ── Web Pattern Learner ────────────────────────────────────────────────
 
 describe('content classification', () => {

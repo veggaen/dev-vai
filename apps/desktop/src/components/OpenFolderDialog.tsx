@@ -528,4 +528,29 @@ export function OpenFolderDialog() {
                 <div className="mt-4">
                   <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                     <Clock size={11} /> Recent folders
-            
+                  </div>
+                  <ul className="space-y-0.5">
+                    {recents.map((recent) => (
+                      <li key={recent}>
+                        <button
+                          type="button"
+                          onClick={() => { setPath(recent); void scanThenMaybeStart(recent); }}
+                          className="w-full truncate rounded-md px-2.5 py-1.5 text-left font-mono text-[11px] text-zinc-400 transition hover:bg-white/5 hover:text-zinc-200"
+                          title={recent}
+                        >
+                          {recent}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              </>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

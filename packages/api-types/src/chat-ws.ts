@@ -65,6 +65,13 @@ export const chatWebSocketInboundSchema = z
         || context.terminalOutput !== undefined,
       'At least one captured editor field is required',
     ).optional(),
+    /**
+     * Re-run of the previous turn ("Retry"). The client resends the last user
+     * message's content; the server must NOT persist it again (the original row
+     * already exists) and replaces the previous assistant answer instead of
+     * appending a duplicate user/assistant pair.
+     */
+    regenerate: z.boolean().optional(),
     /** Absolute path to an attached local workspace folder (desktop). */
     workspaceRoot: z.string().min(1).optional(),
     /** When true (default), file extracts become diff proposals instead of silent writes. */
@@ -222,3 +229,50 @@ export type ChatProgressStep = z.infer<typeof chatProgressStepSchema>;
 export type DraftCandidate = z.infer<typeof draftCandidateSchema>;
 export type DraftVote = z.infer<typeof draftVoteSchema>;
 export type DraftRaceProgress = z.infer<typeof draftRaceProgressSchema>;
+
+const chatOutboundTypeSchema = z.enum([
+  'text_delta', 'reasoning_delta', 'draft_delta', 'info_block', 'tool_call_delta',
+  'progress', 'turn_kind', 'sources', 'done', 'conversation_resolved',
+  'fallback_notice', 'verification', 'image_progress', 'image_result', 'ide_event', 'error',
+]);
+
+/** Transport envelope validated immediately before every WebSocket send. */
+export const chatWebSocketOutboundSchema = z.object({
+  type: chatOutboundTypeSchema,
+  textDelta: z.string().optional(),
+  reasoningDelta: z.string().optional(),
+  draftText: z.string().optional(),
+  progress: chatProgressStepSchema.optional(),
+  turnKind: z.string().optional(),
+  conversationId: z.string().min(1).optional(),
+  durationMs: z.number().nonnegative().optional(),
+  error: z.string().optional(),
+  code: z.string().optional(),
+  retryable: z.boolean().optional(),
+  sources: z.array(z.unknown()).optional(),
+  followUps: z.array(z.string()).optional(),
+  confidence: z.number().optional(),
+  usage: z.unknown().optional(),
+  fallback: z.unknown().optional(),
+  verification: z.unknown().optional(),
+  thinking: z.unknown().optional(),
+  image: z.unknown().optional(),
+  ideEvent: z.unknown().optional(),
+  draft: z.unknown().optional(),
+  infoBlock: z.unknown().optional(),
+  toolCallDelta: z.unknown().optional(),
+  groundedBrief: z.unknown().optional(),
+  researchTrace: z.unknown().optional(),
+  sourcePresentation: z.unknown().optional(),
+  modelId: z.string().optional(),
+}).passthrough().superRefine((value, context) => {
+  const required: Partial<Record<z.infer<typeof chatOutboundTypeSchema>, string>> = {
+    text_delta: 'textDelta', reasoning_delta: 'reasoningDelta', draft_delta: 'draftText',
+    progress: 'progress', turn_kind: 'turnKind', conversation_resolved: 'conversationId', error: 'error',
+  };
+  const field = required[value.type];
+  if (field && (value as Record<string, unknown>)[field] === undefined) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${value.type} requires ${field}` });
+  }
+});
+export type ChatWebSocketOutbound = z.infer<typeof chatWebSocketOutboundSchema>;

@@ -11,6 +11,7 @@ import { VaiMark } from '../brand/VaiMark.js';
 
 export function LocalAppPreview() {
   const localName = useWorkspaceStore((s) => s.localName);
+  const localRoot = useWorkspaceStore((s) => s.localRoot);
   const devStatus = useWorkspaceStore((s) => s.devServerStatus);
   const devUrl = useWorkspaceStore((s) => s.devServerUrl);
   const devLabel = useWorkspaceStore((s) => s.devServerLabel);
@@ -113,6 +114,16 @@ export function LocalAppPreview() {
                   )}
                 </div>
               </div>
+              <dl className="mt-4 grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1 border-y border-white/[0.06] py-3 text-[10px] leading-4">
+                <dt className="text-[color:var(--chat-muted)]">Folder</dt>
+                <dd className="truncate font-mono text-[color:var(--chat-body)]" title={localRoot ?? undefined}>{localRoot ?? 'Unknown'}</dd>
+                <dt className="text-[color:var(--chat-muted)]">Command</dt>
+                <dd className="font-mono text-[color:var(--chat-body)]">{detectedRunCommand ?? 'No command reported'}</dd>
+                <dt className="text-[color:var(--chat-muted)]">Access</dt>
+                <dd className="text-amber-200/90">Runs project code as your OS user; it may read project files, start child processes, and use the network.</dd>
+                <dt className="text-[color:var(--chat-muted)]">Persistence</dt>
+                <dd className="text-[color:var(--chat-body)]">Run once expires when stopped. Always is stored only for this folder and can be revoked by choosing Not now.</dd>
+              </dl>
               <div className="mt-4 flex items-center gap-2">
                 <button
                   type="button"

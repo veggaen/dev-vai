@@ -32,8 +32,23 @@ import {
   sessionEventPinBodySchema,
   sessionEventsBodySchema,
   sessionNoteBodySchema,
-} from '@vai/api-types/sessions';
+} from '@vai/contracts/sessions';
 import { invalidRequestBody } from '../validation/http-validation.js';
+import { assertResponseContract } from '../validation/response-contract.js';
+import {
+  createSessionResponseSchema,
+  importSessionResponseSchema,
+  sessionContextResponseSchema,
+  sessionDetailResponseSchema,
+  sessionEventListResponseSchema,
+  sessionExportResponseSchema,
+  sessionInsightsResponseSchema,
+  sessionIntelligenceResponseSchema,
+  sessionListResponseSchema,
+  sessionPinnedEventsResponseSchema,
+  sessionPinnedNotesResponseSchema,
+  sessionSearchResponseSchema,
+} from '@vai/contracts/session-responses';
 
 export function registerSessionRoutes(app: FastifyInstance, sessions: SessionService) {
   /* ── List sessions ── */
@@ -46,7 +61,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
-    return { sessions: sessionList, total: sessionList.length };
+    return assertResponseContract(sessionListResponseSchema, { sessions: sessionList, total: sessionList.length }, 'GET /api/sessions');
   });
 
   /* ── Create session ── */
@@ -63,7 +78,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     if (!parsed.success) {
       return invalidRequestBody(reply, parsed.error);
     }
-    return sessions.createSession(parsed.data);
+    return assertResponseContract(createSessionResponseSchema, sessions.createSession(parsed.data), 'POST /api/sessions');
   });
 
   /* ── Context summary (for agents bootstrapping context) ── */
@@ -71,7 +86,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     Querystring: { limit?: string };
   }>('/api/sessions/context', async (request) => {
     const limit = request.query.limit ? Number(request.query.limit) : 5;
-    return sessions.getContextSummary(limit);
+    return assertResponseContract(sessionContextResponseSchema, sessions.getContextSummary(limit), 'GET /api/sessions/context');
   });
 
   /* ── Cross-session search ── */
@@ -96,7 +111,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       limit: limit ? Number(limit) : undefined,
     });
 
-    return { results, total: results.length };
+    return assertResponseContract(sessionSearchResponseSchema, { results, total: results.length }, 'GET /api/sessions/search');
   });
 
   /* ── Import session from JSON ── */
@@ -111,7 +126,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       return invalidRequestBody(reply, parsed.error);
     }
     const id = sessions.importSession(parsed.data as never);
-    return { id, success: true };
+    return assertResponseContract(importSessionResponseSchema, { id, success: true }, 'POST /api/sessions/import');
   });
 
   /* ── List all session scores ── */
@@ -167,7 +182,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       const session = sessions.getSession(request.params.id);
       if (!session) return { error: 'Session not found' };
       const eventCount = sessions.getEventCount(request.params.id);
-      return { session, eventCount };
+      return assertResponseContract(sessionDetailResponseSchema, { session, eventCount }, 'GET /api/sessions/:id');
     },
   );
 
@@ -297,7 +312,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       order?: 'asc' | 'desc';
     };
   }>('/api/sessions/:id/events', async (request) => {
-    return sessions.getEvents(request.params.id, {
+    return assertResponseContract(sessionEventListResponseSchema, sessions.getEvents(request.params.id, {
       type: request.query.type,
       messageRole: request.query.role,
       limit: request.query.limit ? Number(request.query.limit) : undefined,
@@ -305,7 +320,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       after: request.query.after ? Number(request.query.after) : undefined,
       before: request.query.before ? Number(request.query.before) : undefined,
       order: request.query.order,
-    });
+    }), 'GET /api/sessions/:id/events');
   });
 
   /* ── Pin / Unpin event ── */
@@ -363,7 +378,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       const analysis = analyzer.analyze(session, events);
 
       if (events.length === 0) {
-        return { score: null, report: null, analysis };
+        return assertResponseContract(sessionIntelligenceResponseSchema, { score: null, report: null, analysis }, 'GET /api/sessions/:id/intelligence');
       }
 
       const scorer = new ConversationScorer();
@@ -375,7 +390,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       sessions.deleteLessonsForSession(request.params.id);
       sessions.saveLessons(report.lessons);
 
-      return { score, report, analysis };
+      return assertResponseContract(sessionIntelligenceResponseSchema, { score, report, analysis }, 'GET /api/sessions/:id/intelligence');
     },
   );
 
@@ -443,7 +458,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     async (request) => {
       const data = sessions.exportSession(request.params.id);
       if (!data) return { error: 'Session not found' };
-      return data;
+      return assertResponseContract(sessionExportResponseSchema, data, 'GET /api/sessions/:id/export');
     },
   );
 
@@ -452,7 +467,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     Params: { id: string };
   }>('/api/sessions/:id/pinned', async (request) => {
     const events = sessions.getPinnedEvents(request.params.id);
-    return { events, total: events.length };
+    return assertResponseContract(sessionPinnedEventsResponseSchema, { events, total: events.length }, 'GET /api/sessions/:id/pinned');
   });
 
   /* ── Add pinned note to session ── */
@@ -491,7 +506,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
         ? undefined
         : request.query.resolved === 'true',
     });
-    return { notes, total: notes.length };
+    return assertResponseContract(sessionPinnedNotesResponseSchema, { notes, total: notes.length }, 'GET /api/sessions/:id/notes');
   });
 
   /* ── Analyze session — extract intent, outcome, failure patterns ── */
@@ -517,6 +532,6 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       const evts = sessions.getEvents(s.id, {});
       return analyzer.analyze(s, evts);
     });
-    return analyzer.aggregateInsights(analyses);
+    return assertResponseContract(sessionInsightsResponseSchema, analyzer.aggregateInsights(analyses), 'GET /api/sessions/insights');
   });
 }

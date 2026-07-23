@@ -3,10 +3,12 @@ import { detectInstructionConstraint, isGenerationIntent } from './chat-quality.
 import { hasExplicitSoftwareBuildRequest, isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
 import { wantsExplicitSourceReferences } from './intent-lexicon.js';
 import { isExplicitResearchRequest, isExplicitWebSearchRequest } from '../models/explicit-web-search.js';
+import { detectVenuePracticalDetail } from '../venue-practical-detail.js';
 import {
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
   isPureConversationalTurn,
+  needsLiveExternalEvidence,
 } from '../models/web-conclude-policy.js';
 
 export type ChatTurnKind = 'conversational' | 'research' | 'builder' | 'analysis';
@@ -39,12 +41,25 @@ export function classifyChatTurn(input: ClassifyChatTurnInput): ChatTurnKind {
 
   const turnContext = { activeMode: input.mode, hasActiveSandbox: input.hasActiveSandbox };
 
+  // An explicit software build command owns the turn even if its product copy
+  // mentions a mutable real-world noun such as menu, prices, or contact. This
+  // also prevents the broad live-evidence heuristic from stealing ordinary
+  // "start this page/app" requests before the builder gate can see them.
+  if ((isGenerationIntent(trimmed) || hasExplicitSoftwareBuildRequest(trimmed))
+    && !isProductEngineeringPlanningPrompt(trimmed)) {
+    return 'builder';
+  }
+
   // Fresh local recommendations must win before the loose gamer-slang matcher:
   // Unicode place names such as "Hommersåk" can otherwise expose a trailing
   // ASCII "k" as a standalone regex word and look like a casual-chat token.
   if (
     isFreshLocalRecommendationRequest(trimmed)
     || isFreshLocalBusinessContactRequest(trimmed)
+    || (detectVenuePracticalDetail(trimmed) !== null
+      && !hasExplicitSoftwareBuildRequest(trimmed)
+      && !SANDBOX_EDIT_PATTERN.test(trimmed))
+    || (needsLiveExternalEvidence(trimmed, turnContext) && !isProductEngineeringPlanningPrompt(trimmed))
     || isExplicitWebSearchRequest(trimmed)
     || isExplicitResearchRequest(trimmed)
   ) {

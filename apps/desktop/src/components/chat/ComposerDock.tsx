@@ -296,4 +296,33 @@ export function ComposerDock({
                     onClick={() => { onKeepFiles(); setOpenSection(null); }}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-softer)]"
                   >
-                    <Check c
+                    <Check className="h-3 w-3" /> Keep
+                  </button>
+                  {onDiscardFiles && (
+                    <button
+                      type="button"
+                      onClick={() => { onDiscardFiles(); setOpenSection(null); }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--panel-border-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--chat-muted)] transition-colors hover:border-[color:var(--tone-bad)] hover:text-[color:var(--tone-bad)]"
+                    >
+                      Discard
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setOpenSection(null)}
+                    className="ml-auto rounded p-1 text-[color:var(--chat-muted)] transition-colors hover:text-[color:var(--chat-strong)]"
+                    aria-label="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+export default ComposerDock;

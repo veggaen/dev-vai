@@ -259,7 +259,7 @@ export function buildSearchRegex(options: SearchFilesOptions): RegExp {
   try {
     return new RegExp(source, options.caseSensitive ? 'g' : 'gi');
   } catch (err) {
-    throw new Error(`Invalid regular expression: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Invalid regular expression: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 }
 

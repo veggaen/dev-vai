@@ -1,5 +1,5 @@
 import type { TurnThinkingUI } from '../../stores/chatStore.js';
-import type { AdvisorTrace } from '@vai/api-types/chat-ws';
+import type { AdvisorTrace } from '@vai/contracts/chat-ws';
 
 /** View model for the Thinking panel — pure, derived from a turn's trace. */
 export interface ThinkingPanelModel {

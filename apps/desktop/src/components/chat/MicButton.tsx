@@ -4,6 +4,7 @@ import { Mic, MicOff, Loader2 } from 'lucide-react';
 import type { DictationStatus } from '../../hooks/useVoiceDictation.js';
 import type { MicTriggerMode } from '../../lib/voice/mic-mode.js';
 import { LevelBars } from './DictationLevel.js';
+import { useShortcutsStore } from '../../stores/shortcutsStore.js';
 
 interface MicButtonProps {
   readonly status: DictationStatus;
@@ -31,6 +32,8 @@ export function MicButton({
   const transcribing = status === 'transcribing';
   const dictationBlocked = Boolean(disabled || !supported || status === 'unsupported');
   const pointerHoldingRef = useRef(false);
+  const shortcutOverride = useShortcutsStore((state) => state.overrides.globalDictation);
+  const globalShortcut = shortcutOverride ?? 'Win+Alt';
 
   const title = !supported || status === 'unsupported'
     ? 'Voice input is not available in this environment'
@@ -42,7 +45,7 @@ export function MicButton({
         ? 'Transcribing…'
         : mode === 'toggle'
           ? 'Click to dictate · right-click for voice settings'
-          : 'Hold to dictate (game-safe: Ctrl+Shift+Space; Win+Alt also works) · right-click for voice settings';
+          : `Hold to dictate (game-safe: ${globalShortcut}) · right-click for voice settings`;
 
   const handlePrimary = useCallback(() => {
     if (dictationBlocked || transcribing) return;

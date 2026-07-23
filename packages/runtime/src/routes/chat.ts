@@ -18,8 +18,8 @@ import type { LocalSteeringInput, SteeringPacket } from '../steering/local-steer
 import { authorizeConversationAccess } from '../access/conversations.js';
 import { TurnSerializer } from '../turn-serializer.js';
 import { WorkspaceTurnCoordinator, buildWorkspaceColleagueNote } from '../workspace-coordinator.js';
-import { chatWebSocketInboundSchema } from '@vai/api-types/chat-ws';
-import type { AdvisorTrace, ChatProgressStep } from '@vai/api-types/chat-ws';
+import { chatWebSocketInboundSchema, chatWebSocketOutboundSchema } from '@vai/contracts/chat-ws';
+import type { AdvisorTrace, ChatProgressStep } from '@vai/contracts/chat-ws';
 
 export interface RegisterChatRoutesOptions {
   /** Email that may use owner-only features (e.g. allowLearn). Set via VAI_OWNER_EMAIL. */
@@ -34,6 +34,8 @@ export interface RegisterChatRoutesOptions {
     isEnabled(): boolean;
     run(input: LocalSteeringInput): Promise<SteeringPacket | null>;
   };
+  /** Automatic governed-memory extraction after a completed turn. Fire-and-forget and inspectable via /api/memory. */
+  extractMemory?: (conversationId: string, userId: string) => void;
 }
 
 const SOCKET_OPEN = 1;
@@ -104,7 +106,8 @@ async function sendJson(socket: { readyState: number; bufferedAmount: number; se
     }
   }
 
-  socket.send(JSON.stringify(payload));
+  const validated = chatWebSocketOutboundSchema.parse(payload);
+  socket.send(JSON.stringify(validated));
   return true;
 }
 
@@ -529,6 +532,7 @@ export function registerChatRoutes(
                 imageMode: data.imageMode === true,
                 processDepth: data.processDepth,
                 councilModelIds: data.councilModelIds,
+                regenerate: data.regenerate === true,
               },
             ))) {
               if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
@@ -551,6 +555,9 @@ export function registerChatRoutes(
                   await steeringPublishPromise;
                 }
                 turnFinalized = true;
+              }
+              if (chunk.type === 'done') {
+                options.extractMemory?.(conversationId, viewer.user?.id ?? 'local');
               }
               const sent = await sendJson(socket, chunk);
               if (!sent) break;

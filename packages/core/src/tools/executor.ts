@@ -24,6 +24,10 @@ import {
   buildToolBatchProgress,
   toolRunsFromCalls,
 } from './tool-progress.js';
+import { LIMITS, TIMEOUTS_MS } from '@vai/constants';
+import { prependUntrustedContentPolicy, wrapUntrustedContent } from '../security/untrusted-content.js';
+import type { CapabilityScope } from '@vai/contracts/adoption';
+import { capabilityDenialMessage, decideToolCapabilities } from '../security/capability-policy.js';
 
 // ── Types ──
 
@@ -34,6 +38,12 @@ export interface ToolExecutorConfig {
   toolTimeout: number;
   /** Working directory for file-based tools */
   workingDir: string;
+  /** Host-owned workspace ceiling. Never populate this from repository config. */
+  workspaceScope: CapabilityScope;
+  /** Session can only further restrict the workspace ceiling. */
+  sessionScope: CapabilityScope;
+  /** Tiny host-selected schema set injected before a task requests more tools. */
+  defaultToolNames: readonly string[];
 }
 
 export interface ToolExecutionResult {
@@ -71,9 +81,12 @@ export interface AgentLoopResult {
 // ── Default Config ──
 
 const DEFAULT_CONFIG: ToolExecutorConfig = {
-  maxIterations: 10,
-  toolTimeout: 30_000, // 30 seconds per tool
+  maxIterations: LIMITS.toolIterations,
+  toolTimeout: TIMEOUTS_MS.toolExecution,
   workingDir: process.cwd(),
+  workspaceScope: 'read-only',
+  sessionScope: 'read-only',
+  defaultToolNames: [],
 };
 
 // ── Tool Executor ──
@@ -99,8 +112,11 @@ export class ToolExecutor {
   /**
    * Convert registered tools to ToolDefinition[] for the model's `tools` parameter.
    */
-  getToolDefinitions(): ToolDefinition[] {
-    return this.tools.list().map((tool) => ({
+  getToolDefinitions(names?: readonly string[]): ToolDefinition[] {
+    const selected = names === undefined
+      ? this.tools.list()
+      : names.flatMap((name) => this.tools.has(name) ? [this.tools.get(name)] : []);
+    return selected.map((tool) => ({
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
@@ -123,11 +139,27 @@ export class ToolExecutor {
       }
 
       const tool = this.tools.get(toolCall.name);
+      const decision = decideToolCapabilities({
+        required: tool.requiredCapabilities,
+        workspaceScope: this.config.workspaceScope,
+        sessionScope: this.config.sessionScope,
+      });
+      if (!decision.allowed) {
+        return {
+          toolCall,
+          success: false,
+          output: capabilityDenialMessage(tool.name, decision),
+          durationMs: Math.round(performance.now() - start),
+        };
+      }
       const args = JSON.parse(toolCall.arguments);
 
       const ctx: ToolContext = {
         workingDir: this.config.workingDir,
         timeout: this.config.toolTimeout,
+        workspaceScope: decision.workspaceScope,
+        sessionScope: decision.sessionScope,
+        capabilities: decision.effective,
       };
 
       const result = await tool.execute(args, ctx);
@@ -157,8 +189,10 @@ export class ToolExecutor {
     adapter: ModelAdapter,
     request: ChatRequest,
   ): AsyncGenerator<ChatChunk & { _toolExecution?: ToolExecutionResult }> {
-    const messages = [...request.messages];
-    const toolDefs = request.tools ?? this.getToolDefinitions();
+    const messages = prependUntrustedContentPolicy(request.messages) as Message[];
+    // Schemas are context too. Start with the explicit minimal set; callers
+    // load task-relevant schemas on demand through request.tools.
+    const toolDefs = request.tools ?? this.getToolDefinitions(this.config.defaultToolNames);
     const allToolExecutions: ToolExecutionResult[] = [];
     const totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, cachedTokens: 0 };
     const loopStart = performance.now();
@@ -260,7 +294,10 @@ export class ToolExecutor {
 
           messages.push({
             role: 'tool',
-            content: result.output,
+            content: wrapUntrustedContent('tool-output', result.output, {
+              source: result.toolCall.name,
+              maxCharacters: LIMITS.toolOutputCharacters,
+            }),
             toolCallId: result.toolCall.id,
           });
         }

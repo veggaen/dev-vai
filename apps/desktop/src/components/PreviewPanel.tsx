@@ -20,6 +20,11 @@ import { SandboxAppToggle } from './SandboxAppToggle.js';
 import { WorkspaceLayoutControls } from './workspace/WorkspaceLayoutControls.js';
 import { HoverResizeHandle } from './workspace/HoverResizeHandle.js';
 import { createPreviewRepairPrompt, PreviewFailureState } from './preview/PreviewFailureState.js';
+import {
+  PREVIEW_REFRESH_REQUEST_EVENT,
+  parsePreviewRefreshRequest,
+  previewUrlForRefresh,
+} from '../lib/preview-verification.js';
 
 /* ── Types ── */
 
@@ -1570,6 +1575,7 @@ export function PreviewPanel() {
   const [breakpoint, setBreakpoint] = useState<BreakpointKey>('desktop');
   const [copied, setCopied] = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
+  const [previewRefreshRequestId, setPreviewRefreshRequestId] = useState<string | null>(null);
   const [previewWaitExpired, setPreviewWaitExpired] = useState(false);
   const [envSetupOpen, setEnvSetupOpen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -1595,6 +1601,10 @@ export function PreviewPanel() {
   const toggleDemo = useCursorStore((s) => s.toggleDemo);
 
   const previewUrl = devPort ? `http://localhost:${devPort}` : 'about:blank';
+  const iframePreviewUrl = useMemo(
+    () => previewRefreshRequestId ? previewUrlForRefresh(previewUrl, previewRefreshRequestId) : previewUrl,
+    [previewRefreshRequestId, previewUrl],
+  );
   const hasFiles = files.length > 0;
   const hasActiveSandbox = projectId !== null;
   const canShowConsoleChrome = hasActiveSandbox || status === 'failed' || buildStatus.step === 'failed';
@@ -1700,13 +1710,22 @@ export function PreviewPanel() {
   }, [shouldShowPreviewOverlay]);
 
   const refresh = useCallback(() => {
-    if (iframeRef.current) {
-      setIframeReady(false);
-      const url = new URL(iframeRef.current.src);
-      url.searchParams.set('_t', String(Date.now()));
-      iframeRef.current.src = url.toString();
-    }
+    setIframeReady(false);
+    setPreviewRefreshRequestId(`manual-${Date.now()}`);
   }, []);
+
+  useEffect(() => {
+    const handlePreviewRefreshRequest = (event: Event) => {
+      const request = parsePreviewRefreshRequest(event instanceof CustomEvent ? event.detail : null);
+      if (!request || request.port !== devPort) return;
+      setViewMode('preview');
+      setIframeReady(false);
+      markPreviewLoading(request.port);
+      setPreviewRefreshRequestId(request.requestId);
+    };
+    window.addEventListener(PREVIEW_REFRESH_REQUEST_EVENT, handlePreviewRefreshRequest);
+    return () => window.removeEventListener(PREVIEW_REFRESH_REQUEST_EVENT, handlePreviewRefreshRequest);
+  }, [devPort, markPreviewLoading]);
 
   const openExternal = () => { if (devPort) window.open(`http://localhost:${devPort}`, '_blank'); };
 
@@ -1744,7 +1763,7 @@ export function PreviewPanel() {
           className="preview-panel-iframe-bg relative h-full w-full overflow-hidden"
           style={{ width: breakpoint === 'desktop' ? '100%' : BREAKPOINTS[breakpoint].width, maxWidth: '100%' }}
         >
-          <iframe ref={iframeRef} src={previewUrl} className="h-full w-full" data-testid="preview-iframe"
+          <iframe ref={iframeRef} src={iframePreviewUrl} className="h-full w-full" data-testid="preview-iframe"
             onLoad={() => setTimeout(() => {
               if (previewCacheKey) {
                 seenPreviewKeysRef.current.add(previewCacheKey);
@@ -1975,7 +1994,7 @@ export function PreviewPanel() {
                   className="preview-panel-iframe-bg relative h-full w-full overflow-hidden"
                   style={{ width: breakpoint === 'desktop' ? '100%' : BREAKPOINTS[breakpoint].width, maxWidth: '100%' }}
                 >
-                  <iframe ref={iframeRef} src={previewUrl} className="h-full w-full" data-testid="preview-iframe"
+                  <iframe ref={iframeRef} src={iframePreviewUrl} className="h-full w-full" data-testid="preview-iframe"
                     onLoad={() => setTimeout(() => {
                       if (previewCacheKey) {
                         seenPreviewKeysRef.current.add(previewCacheKey);

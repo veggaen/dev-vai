@@ -1,7 +1,7 @@
 /**
  * Shared response shapes for client type-safety.
  *
- * Performance: import only as `import type { ... } from '@vai/api-types/responses'`
+ * Performance: import only as `import type { ... } from '@vai/contracts/responses'`
  * so bundlers do not include Zod or this module at runtime.
  */
 import { z } from 'zod';

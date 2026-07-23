@@ -45,7 +45,7 @@ export function SettingsDrawer() {
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: -16 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className={`settings-drawer flex h-full min-w-0 flex-col overflow-hidden border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)] shadow-[4px_0_24px_rgba(0,0,0,0.18)] ${
+        className={`settings-drawer flex h-full min-w-0 flex-col overflow-hidden border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)] shadow-[4px_0_24px_rgba(0,0,0,0.18)] max-[640px]:fixed max-[640px]:inset-0 max-[640px]:z-[100] max-[640px]:w-full max-[640px]:max-w-none max-[640px]:border-r-0 ${
           editingTheme ? 'flex-[2] max-w-[min(42rem,48%)]' : 'flex-[4]'
         }`}
         role="dialog"
@@ -55,7 +55,7 @@ export function SettingsDrawer() {
         <div className="flex h-11 shrink-0 items-center justify-between border-b border-[color:var(--border)] px-5">
           <div>
             <h2 className="text-sm font-semibold text-[color:var(--fg)]">Settings</h2>
-            <p className="text-[11px] text-[color:var(--color-muted)]">Appearance, AI, integrations, shortcuts</p>
+            <p className="text-[11px] text-[color:var(--color-muted)]">Appearance, AI, workspace, trust</p>
           </div>
           <button
             type="button"
@@ -85,7 +85,7 @@ export function SettingsDrawer() {
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
         onClick={editingTheme ? undefined : close}
-        className={`settings-drawer-backdrop h-full min-w-[4.5rem] flex-1 border-0 transition-colors ${
+        className={`settings-drawer-backdrop h-full min-w-[4.5rem] flex-1 border-0 transition-colors max-[640px]:hidden ${
           editingTheme
             ? 'cursor-default bg-transparent'
             : 'cursor-default bg-black/35 hover:bg-black/45'

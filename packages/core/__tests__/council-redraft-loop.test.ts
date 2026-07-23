@@ -236,6 +236,29 @@ describe('runCouncilLoop', () => {
     });
   }, COUNCIL_LOOP_TIMEOUT_MS);
 
+  it('keeps the relevant original when Council rewrites Vai self-assessment into the Lima example', async () => {
+    const service = makeService(rereadRoster(
+      'identify Vai\'s most important engineering bottleneck and propose an acceptance test',
+      'separate inspected evidence from inference',
+    ));
+    const prompt = 'Vai, act as the institution responsible for your own improvement. Based only on what you can actually inspect or remember, name the single most important engineering bottleneck preventing you from becoming more capable without depending on third-party models. Separate evidence from inference, and propose one acceptance test.';
+    const original = JSON.stringify({
+      bottleneck: 'Contextual understanding and relevance in responses',
+      acceptance_test: 'A contextual follow-up must retain the active engineering topic and reject unrelated general-knowledge snippets.',
+    }, null, 2);
+
+    const result = await runLoop(
+      service,
+      { prompt, draftText: original, modelId: 'vai:v0' },
+      async () => 'The capital of Peru is **Lima**.',
+    );
+
+    expect(result.revised).toBe(false);
+    expect(result.finalText).toBe(original);
+    expect(result.finalText).not.toMatch(/capital of Peru/i);
+    expect(result.auditMeta?.outcomeKind).toBe('O6');
+  }, COUNCIL_LOOP_TIMEOUT_MS);
+
   it('redrafts and keeps the better answer when the council asks for a reread', async () => {
     // First convene flags reread; the redraft produces text the SAME (ship) roster
     // would clear — so the loop must adopt it. We swap the roster mid-loop is not

@@ -161,4 +161,34 @@ describe('mergeProgressStepsForMessage — stable process timeline identity', ()
     ]);
   });
 
-  it('k
+  it('keeps repeated build actions when a generic stage is reused', () => {
+    const steps = mergeProgressStepsForMessage([
+      { stage: 'council-review', label: 'Reviewer is checking the edit', status: 'done' },
+    ], {
+      stage: 'council-review',
+      label: 'Reviewer is verifying the repaired edit',
+      status: 'running',
+    });
+
+    expect(steps).toHaveLength(2);
+    expect(steps.map((step) => step.label)).toEqual([
+      'Reviewer is checking the edit',
+      'Reviewer is verifying the repaired edit',
+    ]);
+  });
+
+  it('replaces an empty search result when a later pipeline finds real evidence', () => {
+    const steps = mergeProgressStepsForMessage([
+      { stage: 'search', label: 'No web sources found', status: 'done' },
+    ], {
+      stage: 'search',
+      label: 'Found 1 source',
+      detail: '1 source',
+      status: 'done',
+      processLog: [{ kind: 'artifact', label: 'Sources found (1)', body: 'Official venue page' }],
+    });
+
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ stage: 'search', label: 'Found 1 source', detail: '1 source' });
+  });
+});

@@ -78,4 +78,18 @@ describe('builder request router', () => {
     });
   });
 
-  it('r
+  it('routes runtime repair and modernization language into the active project', () => {
+    const prompt = 'Repair this observed Node 22 startup failure and implement the smallest durable modernization.';
+
+    expect(routeBuilderRequest({
+      input: prompt,
+      activeMode: 'builder',
+      hasActiveSandboxContext: true,
+      snapshotPaths: ['package.json', 'src/App.js'],
+    })).toMatchObject({
+      kind: 'active-project-iteration',
+      shouldGenerateFreshBuild: false,
+      shouldPatchActiveSandbox: true,
+    });
+  });
+});

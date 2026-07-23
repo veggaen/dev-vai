@@ -25,6 +25,7 @@ class HybridSttAdapter implements SttAdapter {
     const previewEnabled = loadLivePreviewEnabled();
     return recorderSttAdapter.start({
       lang: options?.lang,
+      quality: options?.quality,
       deviceId: options?.deviceId,
       // Stream local-Whisper partials only when live preview is on.
       onPartial: previewEnabled ? options?.onPartial : undefined,

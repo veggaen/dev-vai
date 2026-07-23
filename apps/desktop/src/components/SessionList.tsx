@@ -17,7 +17,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore.js';
-import type { AgentSession } from '@vai/core/browser';
+import type { AgentSession } from '@vai/contracts/session-models';
 import {
   sessionSourceKey,
   sourceBadge,

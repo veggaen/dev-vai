@@ -1,8 +1,9 @@
 /**
  * DockRail — Odyssey mode's nav instrument.
- * A bold bottom-center dock (PewDiePie-app energy): chunky glowing tiles,
- * springy magnify on hover, label bubbles above. Structurally different from
- * both compact's left rail and open's top bar.
+ * A bottom-center dock: quiet tiles with a restrained lift on hover and label
+ * bubbles above. Structurally different from both compact's left rail and
+ * open's top bar. In odyssey the chats tile opens the sidebar slide-over —
+ * the dock is the stage's only permanent chrome.
  */
 
 import { useRef, useState } from 'react';
@@ -154,9 +155,9 @@ function DockTile({
         onHoverEnd={closeTooltip}
         onFocus={openTooltip}
         onBlur={closeTooltip}
-        whileHover={{ scale: 1.22, y: -7 }}
-        whileTap={{ scale: 0.94, y: -2 }}
-        transition={{ type: 'spring', stiffness: 380, damping: 20 }}
+        whileHover={{ scale: 1.08, y: -3 }}
+        whileTap={{ scale: 0.95, y: -1 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 26 }}
         aria-label={`${label}${shortcut ? ` (${shortcut})` : ''}`}
         aria-current={active ? 'page' : undefined}
         className={`dock-tile relative flex h-11 w-11 touch-manipulation items-center justify-center rounded-2xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${

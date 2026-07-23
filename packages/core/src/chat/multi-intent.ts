@@ -61,7 +61,7 @@ const SPLIT_PATTERNS: readonly RegExp[] = [
 // ("nature images only, login for altered and unaltered states" must NOT split on
 // that internal "and").
 const REQUEST_SHAPE_RE =
-  /\b(?:explain|describe|tell|show|build|create|make|generate|scaffold|write|implement|add|compare|recommend|suggest|what|who|when|where|why|which|how|can|could|would|should|give|list|design|develop)\b/i;
+  /^\s*(?:please\s+)?(?:explain|describe|tell|show|build|create|make|generate|scaffold|write|implement|add|compare|recommend|suggest|what|who|when|where|why|which|how|can|could|would|should|give|list|design|develop)\b/i;
 
 function actionOf(buildIntent: AgentBuildIntent): 'answer' | 'build' {
   return buildIntent === 'build' ? 'build' : 'answer';

@@ -29,4 +29,10 @@ describe('product-engineering intent guard', () => {
     expect(isProductEngineeringPlanningPrompt('Build me a todo app with filters and localStorage.')).toBe(false);
     expect(hasExplicitSoftwareExecutionAnchor('Build me a Next.js dashboard app.')).toBe(true);
   });
+
+  it('does not hijack a future-temperature epistemic question as hardware planning', () => {
+    const prompt = 'What will the exact temperature be in Oslo at 15:00 on 19 July 2030? Give the measured value.';
+    expect(hasProductEngineeringSignal(prompt)).toBe(false);
+    expect(isProductEngineeringPlanningPrompt(prompt)).toBe(false);
+  });
 });

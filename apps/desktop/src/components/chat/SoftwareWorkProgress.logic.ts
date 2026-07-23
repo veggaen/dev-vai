@@ -126,9 +126,24 @@ function remainingIssueCountFrom(steps: readonly ChatProgressStep[]): number {
 
 function friendlyAdvisorDetail(value: string | undefined): string | undefined {
   const clean = normalize(value);
-  if (!clean || !/\bbuild-action\b/i.test(clean)) return clean;
+  if (!clean || !/\b(?:build-action|debugging)\b/i.test(clean) || !/\b(?:risks?|confidence)\b/i.test(clean)) return clean;
   const confidence = clean.match(/confidence\s+(\d+)%/i)?.[1];
-  return `The advisor classified this as a software-change task, flagged the strict file-output contract as the main risk${confidence ? `, and reported ${confidence}% confidence` : ''}.`;
+  const task = /\bdebugging\b/i.test(clean) ? 'a debugging and repair task' : 'a software-change task';
+  const risks: string[] = [];
+  if (/format-contract-risk/i.test(clean)) risks.push('the strict file-output contract');
+  if (/workspace|project|path/i.test(clean)) risks.push('editing the correct project and files');
+  const riskText = risks.length > 0 ? `, with ${risks.join(' and ')} as the main risk` : '';
+  return `The advisor classified this as ${task}${riskText}${confidence ? `, and reported ${confidence}% confidence` : ''}.`;
+}
+
+function isWithheldOutcome(steps: readonly ChatProgressStep[]): boolean {
+  let terminal: boolean | undefined;
+  for (const step of steps) {
+    const text = `${step.label} ${step.detail ?? ''}`;
+    if (/\b(?:edit withheld|withheld|blocked|refused)\b/i.test(text)) terminal = true;
+    if (/\b(?:applying targeted edit|applied (?:the )?(?:edit|change)|files? updated|project update complete)\b/i.test(text)) terminal = false;
+  }
+  return terminal ?? false;
 }
 
 function displayLabelForStep(step: ChatProgressStep): string {
@@ -254,7 +269,7 @@ function conciseDetail(
     const passText = repairPass > 0 ? ` · pass ${repairPass}${repairLimit > 0 ? ` of ${repairLimit}` : ''}` : '';
     return `Fixing ${issueText}${passText}`;
   }
-  return normalize(step.label, 180) ?? PHASES.find((phase) => phase.id === id)?.idleDetail ?? '';
+  return displayLabelForStep(step) ?? PHASES.find((phase) => phase.id === id)?.idleDetail ?? '';
 }
 
 export function buildSoftwareWorkView(input: {
@@ -279,4 +294,67 @@ export function buildSoftwareWorkView(input: {
   const issueCount = issueCountFrom(steps);
   const remainingIssueCount = remainingIssueCountFrom(steps);
   const repair = repairStateFrom(steps);
-  const withheld = steps.some((step) => /\b(?:withheld|blocked|refused)\b/i.test(`${st
+  const withheld = isWithheldOutcome(steps);
+
+  const phases = PHASES.map((phase): SoftwarePhaseView => {
+    const phaseSteps = buckets.get(phase.id) ?? [];
+    const latest = phaseSteps.at(-1);
+    const hasAttention = phaseSteps.some((step) => /issue|failed|refused|withheld|sent back|invalid|blocked/i.test(`${step.label} ${step.detail ?? ''}`));
+    const status: SoftwarePhaseStatus = phase.id === activeId
+      ? 'running'
+      : hasAttention && (live || withheld)
+        ? 'attention'
+        : phaseSteps.length > 0 && phaseSteps.every((step) => step.status === 'done')
+          ? 'done'
+          : 'pending';
+    return {
+      id: phase.id,
+      label: phase.label,
+      purpose: phase.purpose,
+      status,
+      detail: conciseDetail(phase.id, latest, issueCount, remainingIssueCount, repair.pass, repair.limit),
+    };
+  });
+
+  const journal = buildJournal(steps);
+  const completedCount = phases.filter((phase) => phase.status === 'done').length;
+  const outputFileCount = input.outputFileCount ?? 0;
+  const observableActionCount = journal.reduce((total, item) => total + 1 + item.notes.length, 0);
+  const repairSummary = repair.pass > 0 ? ` · ${repair.pass} repair pass${repair.pass === 1 ? '' : 'es'}` : '';
+  const durationSummary = input.durationMs && input.durationMs >= 500 ? ` · ${formatWorkDuration(input.durationMs)}` : '';
+  const fileSummary = outputFileCount > 0 ? `${outputFileCount} file${outputFileCount === 1 ? '' : 's'} ready` : 'review complete';
+  const actionSummary = observableActionCount > 0 ? ` · ${observableActionCount} recorded action${observableActionCount === 1 ? '' : 's'}` : '';
+  const activePhase = activeId ? PHASES.find((phase) => phase.id === activeId) : undefined;
+  const outcomeSummary = withheld
+    ? `Withheld${remainingIssueCount > 0
+      ? ` · ${remainingIssueCount} of ${Math.max(issueCount, remainingIssueCount)} validation issues remain`
+      : issueCount > 0 ? ` · ${issueCount} validation issue${issueCount === 1 ? '' : 's'} found` : ''}`
+    : `Implementation · ${fileSummary}`;
+
+  return {
+    phases,
+    journal,
+    activeTitle: activeId
+      ? conciseDetail(activeId, activeStep, issueCount, remainingIssueCount, repair.pass, repair.limit)
+      : live ? 'Preparing the implementation' : 'Implementation reviewed',
+    activeDetail: friendlyAdvisorDetail(activeStep?.detail) ?? normalize(activeStep?.label, 500) ?? (live ? 'Waiting for the next observable action' : fileSummary),
+    activePurpose: activePhase?.purpose ?? 'Preparing the next verified step.',
+    completedCount,
+    issueCount,
+    remainingIssueCount,
+    repairPass: repair.pass,
+    repairLimit: repair.limit,
+    outputFileCount,
+    observableActionCount,
+    withheld,
+    summary: `${outcomeSummary}${actionSummary}${repairSummary}${durationSummary}`,
+  };
+}
+
+export function formatWorkDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder > 0 ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}

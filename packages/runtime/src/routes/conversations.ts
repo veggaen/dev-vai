@@ -10,7 +10,7 @@ import {
   createConversationBodySchema,
   patchConversationBodySchema,
   postConversationMessageBodySchema,
-} from '@vai/api-types/conversations';
+} from '@vai/contracts/conversations';
 import { invalidRequestBody } from '../validation/http-validation.js';
 
 /**
@@ -306,6 +306,28 @@ export function registerConversationRoutes(
     },
   );
 
+  /** Get inspectable Council work artifacts without returning generated source bodies. */
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    '/api/conversations/:id/work-artifacts',
+    async (request, reply) => {
+      const conversation = chatService.getConversation(request.params.id);
+      const viewer = await auth.getViewer(request);
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'read',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'You do not have access to this conversation' };
+      }
+      const limit = Math.max(1, Math.min(Number(request.query.limit) || 5, 20));
+      return { artifacts: chatService.listCouncilWorkArtifacts(request.params.id, limit) };
+    },
+  );
+
   /** Get messages for a conversation */
   app.get<{ Params: { id: string } }>(
     '/api/conversations/:id/messages',
@@ -324,6 +346,66 @@ export function registerConversationRoutes(
         return { error: access.error ?? 'You do not have access to this conversation' };
       }
       return chatService.getMessages(request.params.id);
+    },
+  );
+
+  /**
+   * Machine-readable process trace for a turn — the same stages, durations,
+   * tools, and council verdicts the desktop Timeline renders, exposed so an
+   * agent in a WebSocket chat (or any API client) can investigate and VERIFY
+   * what the UI claims happened. `messageId` targets one turn; default = the
+   * latest assistant turn that carries a trace.
+   */
+  app.get<{ Params: { id: string }; Querystring: { messageId?: string } }>(
+    '/api/conversations/:id/process-trace',
+    async (request, reply) => {
+      const conversation = chatService.getConversation(request.params.id);
+      const viewer = await auth.getViewer(request);
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'read',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'You do not have access to this conversation' };
+      }
+
+      interface TraceStep {
+        stage: string; label: string; status: string; durationMs?: number; detail?: string;
+        toolRuns?: Array<{ name: string; status: string; success?: boolean; durationMs?: number }>;
+        councilMembers?: Array<{ name: string; verdict: string; confidence: number; note?: string }>;
+      }
+      const rows = chatService.getMessages(request.params.id) as Array<{ id: string; role: string; progressSteps?: TraceStep[] }>;
+      const target = [...rows].reverse().find((m) => m.role === 'assistant'
+        && (!request.query.messageId || m.id === request.query.messageId)
+        && Array.isArray(m.progressSteps) && m.progressSteps.length > 0);
+      if (!target) {
+        reply.code(404);
+        return { error: 'No process trace found (turn may predate trace persistence or is still streaming)' };
+      }
+
+      const steps = target.progressSteps ?? [];
+      const totalDurationMs = steps.reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+      const fmt = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? ` ${Math.round(ms)}ms` : ` ${(ms / 1000).toFixed(1)}s`);
+      // Compact agent-quotable rendering — one line per stage, indented detail.
+      const text = steps.map((s) => {
+        const lines = [`[${s.status}] ${s.stage}: ${s.label}${fmt(s.durationMs)}`];
+        for (const t of s.toolRuns ?? []) lines.push(`  tool ${t.name} → ${t.success === false ? 'failed' : t.status}${fmt(t.durationMs)}`);
+        for (const m of s.councilMembers ?? []) lines.push(`  council ${m.name}: ${m.verdict} (${Math.round((m.confidence ?? 0) * 100)}%)`);
+        return lines.join('\n');
+      }).join('\n');
+
+      return {
+        conversationId: request.params.id,
+        messageId: target.id,
+        stepCount: steps.length,
+        totalDurationMs,
+        steps,
+        text,
+      };
     },
   );
 

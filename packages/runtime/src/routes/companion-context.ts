@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { companionContextRespondBodySchema } from '@vai/api-types/companion-context';
+import { companionContextRespondBodySchema } from '@vai/contracts/companion-context';
 import type { PlatformAuthService } from '../auth/platform-auth.js';
 import type { CompanionContextBroker } from '../companion-context/broker.js';
 import { invalidRequestBody } from '../validation/http-validation.js';

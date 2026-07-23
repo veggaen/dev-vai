@@ -14,6 +14,7 @@ export type {
   CouncilCodegenMember,
   CouncilCodegenMessage,
   CouncilCodegenResult,
+  CouncilWithheldProposal,
   CouncilEditContext,
   CouncilEditFile,
 } from './types.js';

@@ -8,7 +8,11 @@ function hashSessionToken(secret: string, token: string): string {
   return createHash('sha256').update(`${secret}:${token}`).digest('hex');
 }
 
-function seedSession(db: VaiDatabase, token: string, lastSeenAt = new Date()): string {
+function hashDurableSessionToken(token: string): string {
+  return createHash('sha256').update(`vai-session-v2:${token}`).digest('hex');
+}
+
+function seedSession(db: VaiDatabase, token: string, lastSeenAt = new Date(), durable = false): string {
   const now = new Date();
   const userId = 'ws-user-1';
   db.insert(schema.platformUsers).values({
@@ -17,7 +21,9 @@ function seedSession(db: VaiDatabase, token: string, lastSeenAt = new Date()): s
   }).run();
   db.insert(schema.platformSessions).values({
     id: 'ws-session-1', userId,
-    tokenHash: hashSessionToken('test-session-secret', token),
+    tokenHash: durable
+      ? hashDurableSessionToken(token)
+      : hashSessionToken('test-session-secret', token),
     userAgent: null, ipAddress: null,
     expiresAt: new Date(now.getTime() + 60_000),
     lastSeenAt, createdAt: now,
@@ -113,9 +119,27 @@ describe('PlatformAuthService local dev auth bypass', () => {
     expect(viewer.user).toBeNull();
   });
 
-  it('authenticates a websocket upgrade via the access_token query param', async () => {
+  it('authenticates a websocket upgrade via the private auth subprotocol', async () => {
     const token = 'ws-session-token-abc';
     const userId = seedSession(db, token);
+    const encodedToken = Buffer.from(token, 'utf8').toString('base64url');
+
+    const viewer = await auth.getViewer(makeRequest(
+      {
+        upgrade: 'websocket',
+        'sec-websocket-protocol': `chat.v1, vai.auth.${encodedToken}`,
+      },
+      '203.0.113.10',
+      '/api/chat',
+    ));
+
+    expect(viewer.authenticated).toBe(true);
+    expect(viewer.user?.id).toBe(userId);
+  });
+
+  it('rejects the access_token query param on a websocket upgrade', async () => {
+    const token = 'ws-session-token-abc';
+    seedSession(db, token);
 
     const viewer = await auth.getViewer(makeRequest(
       { upgrade: 'websocket' },
@@ -123,8 +147,8 @@ describe('PlatformAuthService local dev auth bypass', () => {
       `/api/chat?access_token=${token}`,
     ));
 
-    expect(viewer.authenticated).toBe(true);
-    expect(viewer.user?.id).toBe(userId);
+    expect(viewer.authenticated).toBe(false);
+    expect(viewer.user).toBeNull();
   });
 
   it('ignores the access_token query param on a normal (non-websocket) request', async () => {
@@ -152,6 +176,33 @@ describe('PlatformAuthService local dev auth bypass', () => {
     const viewer = await auth.getViewer(makeRequest({ authorization: `Bearer ${token}` }, '127.0.0.1'));
 
     expect(viewer.role).toBe('owner');
+  });
+
+  it('migrates a valid legacy session to the configuration-independent verifier', async () => {
+    const token = 'legacy-session-to-migrate';
+    seedSession(db, token);
+
+    const viewer = await auth.getViewer(makeRequest({ authorization: `Bearer ${token}` }, '127.0.0.1'));
+    const stored = db.select({ tokenHash: schema.platformSessions.tokenHash })
+      .from(schema.platformSessions)
+      .get();
+
+    expect(viewer.authenticated).toBe(true);
+    expect(stored?.tokenHash).toBe(hashDurableSessionToken(token));
+  });
+
+  it('keeps a durable desktop session valid across runtime secret rotation', async () => {
+    const token = 'durable-session-across-update';
+    const userId = seedSession(db, token, new Date(), true);
+    auth = new PlatformAuthService(db, {
+      ...createPlatformAuthConfig(),
+      sessionSecret: 'rotated-runtime-secret',
+    });
+
+    const viewer = await auth.getViewer(makeRequest({ authorization: `Bearer ${token}` }, '127.0.0.1'));
+
+    expect(viewer.authenticated).toBe(true);
+    expect(viewer.user?.id).toBe(userId);
   });
 
   it('refreshes stale session activity without rewriting every authenticated request', async () => {

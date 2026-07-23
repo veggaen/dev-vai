@@ -1,5 +1,9 @@
 import type { Message } from '../models/adapter.js';
 import { isPureConversationalTurn } from '../models/web-conclude-policy.js';
+import {
+  detectVenuePracticalDetail,
+  resolveVenuePracticalFollowUp,
+} from '../venue-practical-detail.js';
 
 /**
  * Contextual follow-up resolver.
@@ -428,7 +432,10 @@ export function inferPersonFromPriorTurn(history: readonly Message[]): string | 
       const hit = message.content.trim().match(pattern);
       if (hit?.[1]) {
         const topic = cleanTopic(hit[1]);
-        if (topic.length >= 2) return topic;
+        // A practical-detail question is not an entity. Without this guard,
+        // "what is the price of visiting SNØ?" became the literal antecedent
+        // for "what are their opening hours?" and poisoned the next search.
+        if (topic.length >= 2 && !detectVenuePracticalDetail(topic)) return topic;
       }
     }
     break;
@@ -443,6 +450,8 @@ export function inferActiveTopic(history: readonly Message[]): string | null {
 
 /** Rewrite a short contextual follow-up using conversation history. */
 export function resolveContextualFollowUp(input: string, history: readonly Message[]): string | null {
+  const practicalDetailRewrite = resolveVenuePracticalFollowUp(input, history);
+  if (practicalDetailRewrite) return practicalDetailRewrite;
   const topic = inferActiveTopic(history);
   if (!topic) return null;
   return rewritePronounFollowUp(input, topic);

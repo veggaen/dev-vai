@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch --exclude \"./vai.db*\" --exclude \"./vai-knowledge.json*\" src/index.ts",
     "build": "tsc",
-    "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node22 --outfile=dist/bundle.cjs --format=cjs --external:better-sqlite3 --external:jsdom --external:@huggingface/transformers",
+    "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node22 --outfile=dist/bundle.cjs --format=cjs --external:better-sqlite3 --external:jsdom --external:pdf-parse --external:@huggingface/transformers --external:playwright",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "test": "vitest run"
@@ -15,13 +15,15 @@
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
     "@huggingface/transformers": "^3.5.2",
-    "@vai/api-types": "workspace:*",
+    "@vai/constants": "workspace:*",
+    "@vai/contracts": "workspace:*",
     "@vai/core": "workspace:*",
     "@workos-inc/node": "^8.13.0",
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.38.4",
     "fastify": "^5.2.0",
+    "playwright": "^1.61.1",
     "zod": "^3.24.0"
   },
   "devDependencies": {

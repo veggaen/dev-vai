@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import type { ConversationSummary, CreateConversationResponse } from '@vai/api-types/responses';
-import type { ChatProgressStep as ChatProgressStepContract } from '@vai/api-types/chat-ws';
-import { apiFetch, buildChatWebSocketUrl } from '../lib/api.js';
+import type { ConversationSummary, CreateConversationResponse } from '@vai/contracts/responses';
+import type { ChatProgressStep as ChatProgressStepContract } from '@vai/contracts/chat-ws';
+import { apiFetch, buildChatWebSocketProtocols, buildChatWebSocketUrl } from '../lib/api.js';
 import { getActiveCapture, startSessionCapture } from '../lib/sessionCapture.js';
 import type { SessionCapture } from '../lib/sessionCapture.js';
 import { mergeProjectUpdateMessage } from '../lib/project-update-message.js';
@@ -208,6 +208,8 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  /** ISO timestamp — persisted server-side, stamped locally for optimistic messages. */
+  createdAt?: string;
   imageId?: string | null;
   imagePreview?: string;
   /** Which model actually produced this assistant response. */
@@ -296,6 +298,7 @@ export function mergeProgressStepsForMessage(
     const prior = existing[priorIndex];
     const identifiesOneLogicalStep = prior?.status === 'running'
       || prior?.label === incoming.label
+      || incoming.stage === 'search'
       || /(?:^|-)round-?\d+(?:$|-)/i.test(incoming.stage);
     if (identifiesOneLogicalStep) {
       const next = [...existing];
@@ -387,11 +390,13 @@ export function parseAssistantMessagePlan(plan: string | null | undefined): Part
   }
 }
 
-/** Server list row — kept in sync via @vai/api-types/responses (compile-time contract). */
+/** Server list row - kept in sync via @vai/contracts/responses. */
 type Conversation = ConversationSummary;
 
 interface ChatState {
   conversations: Conversation[];
+  /** True after the initial conversation list and saved chat have settled. */
+  conversationsHydrated: boolean;
   activeConversationId: string | null;
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -427,7 +432,9 @@ interface ChatState {
   setConversationVisibility: (id: string, visibility: 'private' | 'unlisted' | 'public') => Promise<string | null>;
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
-  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean }) => void;
+  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean; regenerate?: boolean }) => void;
+  /** Re-runs the latest turn ("Retry"): drops the superseded assistant answer and resends the last user message without duplicating it. */
+  regenerateLastTurn: () => void;
   /** Inject a message from an IDE agent (group chat) */
   injectAgentMessage: (content: string, sender: MessageSender) => void;
   /** Persist a backend-authored project update into the current conversation */
@@ -560,6 +567,7 @@ let broadcastPollTimer: ReturnType<typeof setInterval> | null = null;
 /** Monotonic token so only the most recent selectConversation call wins. */
 let selectConversationToken = 0;
 let resumeSelectionInFlight: string | null = null;
+let conversationBootstrapInFlight = false;
 
 /** Currently active streaming WebSocket. Only one may be open at a time. */
 let activeWs: WebSocket | null = null;
@@ -667,6 +675,7 @@ async function ensureCapture(firstMessage: string, modelId?: string): Promise<Se
 
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
+  conversationsHydrated: false,
   activeConversationId: null,
   messages: [],
   isStreaming: false,
@@ -699,6 +708,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   broadcastChats: loadBroadcastChats(),
 
   fetchConversations: async () => {
+    const ownsBootstrap = !get().conversationsHydrated && !conversationBootstrapInFlight;
+    if (ownsBootstrap) conversationBootstrapInFlight = true;
     try {
       const res = await apiFetch('/api/conversations?limit=50');
       const conversations = (await res.json()) as ConversationSummary[];
@@ -710,14 +721,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       if (!get().activeConversationId && resumeId && resumeSelectionInFlight !== resumeId) {
         resumeSelectionInFlight = resumeId;
-        void get().selectConversation(resumeId).finally(() => {
+        const selection = get().selectConversation(resumeId).finally(() => {
           if (resumeSelectionInFlight === resumeId) {
             resumeSelectionInFlight = null;
           }
         });
+        if (ownsBootstrap) await selection;
       }
     } catch {
       console.error('Failed to fetch conversations');
+    } finally {
+      if (ownsBootstrap) {
+        conversationBootstrapInFlight = false;
+        set({ conversationsHydrated: true });
+      }
     }
   },
 
@@ -754,6 +771,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   startNewChat: () => {
+    // Cancel a slower saved-chat restore so it cannot attach its project after
+    // the user explicitly chose a clean chat.
+    selectConversationToken += 1;
+    resumeSelectionInFlight = null;
     if (activeWs) {
       activeWs.close();
       activeWs = null;
@@ -815,6 +836,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       imageId?: string | null;
       plan?: string | null;
       modelId?: string | null;
+      createdAt?: string | null;
       /** Pruned process trace rehydrated server-side, so the ProcessTree re-expands. */
       progressSteps?: ChatProgressStep[] | null;
     }>;
@@ -864,6 +886,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: m.role as ChatMessage['role'],
         content: m.content,
         imageId: m.imageId,
+        ...(m.createdAt ? { createdAt: m.createdAt } : {}),
         ...(m.role === 'assistant' ? parseAssistantMessagePlan(m.plan) : {}),
         ...(m.role === 'assistant' && m.modelId ? { respondingModelId: m.modelId } : {}),
         ...(m.role === 'assistant' && m.progressSteps?.length ? { progressSteps: m.progressSteps } : {}),
@@ -1040,7 +1063,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().fetchConversations();
   },
 
-  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean }) => {
+  regenerateLastTurn: () => {
+    const state = get();
+    if (state.isStreaming || !state.activeConversationId) return;
+    const msgs = state.messages;
+    let userIndex = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') { userIndex = i; break; }
+    }
+    if (userIndex === -1) return;
+    const userMsg = msgs[userIndex];
+    // Image turns can't be re-run faithfully — the raw image bytes aren't retained client-side.
+    if (userMsg.imageId || userMsg.imagePreview) return;
+    // Drop the superseded assistant answer locally; the server drops its row via the regenerate flag.
+    set({ messages: msgs.slice(0, userIndex + 1) });
+    get().sendMessage(userMsg.content, undefined, undefined, { regenerate: true });
+  },
+
+  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean; regenerate?: boolean }) => {
     const state = get();
     if (!state.activeConversationId) return;
 
@@ -1061,6 +1101,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id: `temp-${Date.now()}`,
       role: 'user',
       content: displayContent,
+      createdAt: new Date().toISOString(),
       imagePreview: image ? `data:${image.mimeType};base64,${image.data}` : undefined,
       isAutoRepair: opts?.isAutoRepair,
       repairAttempt: opts?.repairAttempt,
@@ -1070,10 +1111,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id: `temp-${Date.now()}-assistant`,
       role: 'assistant',
       content: '',
+      createdAt: new Date().toISOString(),
     };
 
     set({
-      messages: [...state.messages, userMsg, assistantMsg],
+      // Regenerate turns reuse the existing user message — only a fresh assistant row is appended.
+      messages: opts?.regenerate
+        ? [...get().messages, assistantMsg]
+        : [...state.messages, userMsg, assistantMsg],
       isStreaming: true,
       streamingConversationId: state.activeConversationId,
     });
@@ -1086,7 +1131,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Use a local reference so callbacks always target *this* socket, not a later replacement.
-    const ws = new WebSocket(buildChatWebSocketUrl());
+    const ws = new WebSocket(buildChatWebSocketUrl(), buildChatWebSocketProtocols());
     activeWs = ws;
 
     ws.onopen = () => {
@@ -1106,6 +1151,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const chatMode = useLayoutStore.getState().mode;
       if (chatMode) payload.mode = chatMode;
       if (opts?.imageMode) payload.imageMode = true;
+      if (opts?.regenerate) payload.regenerate = true;
       if (image) {
         payload.image = {
           data: image.data,
@@ -1718,4 +1764,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setFeedback: (messageId: string, helpful: boolean) => {
     set((state) => {
       const msgs = state.messages.map(m =>
-        m.id 
+        m.id === messageId ? { ...m, feedback: helpful } : m,
+      );
+      return { messages: msgs };
+    });
+    // Fire-and-forget feedback to server
+    apiFetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, helpful }),
+    }).catch(() => { /* silent */ });
+  },
+
+  postSteer: async (args) => {
+    try {
+      const res = await apiFetch('/api/steer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: args.conversationId,
+          from: 'human',
+          author: 'desktop',
+          signal: args.signal,
+          handler: args.handler,
+          note: args.note || 'steered from UI',
+          scope: args.scope || 'class',
+          matchTokens: args.matchTokens,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.ok === false) {
+        return { ok: false, error: json?.error || 'steer failed' };
+      }
+      return { ok: true, guidance: json.guidance };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'network error' };
+    }
+  },
+
+  setProcessDepth: (depth: 'quick' | 'balanced' | 'deep') => {
+    try { localStorage.setItem('vai:processDepth', depth); } catch { /* no storage */ }
+    set({ processDepth: depth });
+  },
+  setCouncilModelIds: (ids: string[] | null) => {
+    const normalized = ids && ids.length > 0 ? ids : null;
+    try {
+      if (normalized) localStorage.setItem('vai:councilModelIds', JSON.stringify(normalized));
+      else localStorage.removeItem('vai:councilModelIds');
+    } catch { /* no storage */ }
+    set({ councilModelIds: normalized });
+  },
+  setLearningEnabled: (enabled: boolean) => {
+    const auth = useAuthStore.getState();
+    if (!auth.isOwner || !get().trainingWorkspace) {
+      set({ learningEnabled: false });
+      return;
+    }
+    set({ learningEnabled: enabled });
+  },
+
+  setTrainingWorkspace: (enabled: boolean) => {
+    const auth = useAuthStore.getState();
+    if (!auth.isOwner) {
+      set({ trainingWorkspace: false, learningEnabled: false });
+      return;
+    }
+    set({ trainingWorkspace: enabled, learningEnabled: enabled ? get().learningEnabled : false });
+  },
+}));
+
+// Expose store for demo system (injectResponse needs setState access)
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__vai_chat_store = useChatStore;
+}

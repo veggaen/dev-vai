@@ -1,0 +1,59 @@
+{
+  "ports": {
+    "runtime": 3006,
+    "directAgent": 48765,
+    "viteDev": 5173,
+    "viteDevAlternate": 5174,
+    "vitePreview": 4173
+  },
+  "publicEndpoints": {
+    "shareDnsTarget": "share.vai.local"
+  },
+  "persistedNames": {
+    "database": "vai.db",
+    "knowledge": "vai-knowledge.json",
+    "runtimeLock": ".vai-runtime.lock",
+    "sourceCapabilities": "vai-source-capabilities.json",
+    "outbox": "vai-outbox.jsonl",
+    "exportFolder": "vai-export",
+    "worktreeFolder": ".vai-worktrees",
+    "personas": "vai-personas.json",
+    "skills": "vai-skills.json",
+    "environments": "vai-environments.json",
+    "links": "vai-links.json",
+    "shares": "vai-shares.json",
+    "activeEnvironment": "vai-active-environment",
+    "activeEnvironmentRecord": "vai-active-environment-record",
+    "platformSessionToken": "vai-platform-session-token",
+    "capabilityGrants": "vai-capability-grants.json",
+    "composerDrafts": "vai-composer-drafts",
+    "exportManifest": "vai-export-manifest.json"
+  },
+  "limits": {
+    "sessionEventPage": 200,
+    "sessionMaxEvents": 5000,
+    "sessionAutoIntelligenceEvents": 2000,
+    "progressStepsPerMessage": 200,
+    "toolIterations": 10,
+    "toolOutputCharacters": 12000,
+    "untrustedContentCharacters": 120000,
+    "contextBudgetReceipts": 200,
+    "healthHistory": 100,
+    "composerAttachmentFiles": 12,
+    "composerAttachmentBytes": 2097152,
+    "defaultModelContextTokens": 32768,
+    "reservedModelOutputTokens": 4096,
+    "shareSnapshotCharacters": 2000000,
+    "composerDraftCharacters": 200000,
+    "shareThemeCssCharacters": 20000,
+    "exportSessions": 10000
+  },
+  "timeoutsMs": {
+    "toolExecution": 30000,
+    "apiRequest": 10000,
+    "sessionPolling": 2000,
+    "streamResume": 15000,
+    "healthStale": 30000,
+    "pairingToken": 300000
+  }
+}

@@ -75,6 +75,22 @@ export interface CouncilCodegenResult {
   readonly memberIds: readonly string[];
 }
 
+/**
+ * Durable, model-neutral handoff for an edit that was withheld by Vai's gates.
+ * Another Council member can continue from the exact candidate files and the
+ * evidence that blocked them without reconstructing context from chat prose.
+ */
+export interface CouncilWithheldProposal {
+  readonly schemaVersion: 1;
+  readonly projectName: string;
+  readonly brief: string;
+  readonly files: readonly CouncilEditFile[];
+  readonly validation: AppValidationReport;
+  readonly reviews: readonly CodegenReviewNote[];
+  readonly repairsUsed: number;
+  readonly memberIds: readonly string[];
+}
+
 export type CouncilCodegenStage = 'architect' | 'code' | 'validate' | 'review' | 'repair' | 'style' | 'assemble';
 
 export type CouncilCodegenEvent =
@@ -90,6 +106,8 @@ export type CouncilCodegenEvent =
     readonly type: 'result';
     /** Null when the council could not produce a valid app — caller falls back. */
     readonly result: CouncilCodegenResult | null;
+    /** Present when a rejected edit still contains useful work worth resuming. */
+    readonly withheld?: CouncilWithheldProposal;
   };
 
 export interface CouncilEditFile {
@@ -123,4 +141,8 @@ export interface CouncilCodegenInput {
   readonly maxRepairs?: number;
   /** Cap on reviewers consulted (members[1..]). Default 2. */
   readonly maxReviewers?: number;
-  /** When
+  /** When set, run as a targeted edit of the active project instead of a fresh build. */
+  readonly edit?: CouncilEditContext;
+  /** A previously withheld edit candidate, loaded from durable task context. */
+  readonly resume?: CouncilWithheldProposal;
+}

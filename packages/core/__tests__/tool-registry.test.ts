@@ -6,6 +6,7 @@ class FakeTool implements Tool {
   readonly name: string;
   readonly description: string;
   readonly parameters = {};
+  readonly requiredCapabilities = ['read'] as const;
 
   constructor(name: string) {
     this.name = name;

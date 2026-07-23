@@ -1,36 +1,7 @@
 import { z } from 'zod';
+import { pinnedNoteCategorySchema, sessionEventTypeSchema } from './session-models.js';
 
-export const sessionEventTypeSchema = z.enum([
-  'message',
-  'thinking',
-  'planning',
-  'context-gather',
-  'checkpoint',
-  'verification',
-  'recovery',
-  'artifact',
-  'file-create',
-  'file-edit',
-  'file-read',
-  'file-delete',
-  'terminal',
-  'search',
-  'todo-update',
-  'state-change',
-  'error',
-  'tool-call',
-  'summary',
-  'note',
-]);
-
-export const pinnedNoteCategorySchema = z.enum([
-  'decision',
-  'blocker',
-  'breakthrough',
-  'todo',
-  'context',
-  'custom',
-]);
+export { pinnedNoteCategorySchema, sessionEventTypeSchema } from './session-models.js';
 
 const sessionEventInputSchema = z
   .object({

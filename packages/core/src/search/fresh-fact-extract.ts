@@ -35,7 +35,7 @@ export interface ExtractedFact {
 /** What KIND of fresh fact the question is asking for. */
 export function classifyFreshFactKind(query: string): ExtractedFact['kind'] | null {
   const q = (query ?? '').toLowerCase();
-  if (/\b(price|cost|worth|how much|trading at|market cap|exchange rate|\$|usd|eur|gbp)\b/.test(q)) return 'price';
+  if (/\b(prices?|costs?|worth|how much|trading at|market cap|exchange rate|\$|usd|eur|gbp|nok|sek|dkk|kr)\b/.test(q)) return 'price';
   if (/\b(weather|temperature|temp|forecast|how (hot|cold|warm)|degrees)\b/.test(q)) return 'temperature';
   if (/\b(latest|newest|current) version|version of|what version\b/.test(q)) return 'version';
   if (/\b(when|what (year|date)|how old|release date|founded|born|died)\b/.test(q)) return 'date';
@@ -46,7 +46,7 @@ export function classifyFreshFactKind(query: string): ExtractedFact['kind'] | nu
 /** Patterns that capture an answer-bearing figure for each fact kind. */
 const KIND_PATTERNS: Record<ExtractedFact['kind'], RegExp> = {
   // A currency amount: $65,706 / 65 706 USD / €1,719.7 / 1763.94 usd
-  price: /(?:[$€£]\s?\d[\d,. ]*\d|\d[\d,. ]*\d\s?(?:usd|eur|gbp|dollars?|euros?))/i,
+  price: /(?:[$€£]\s?\d(?:[\d,. ]*\d)?|\d(?:[\d,. ]*\d)?\s?(?:usd|eur|gbp|nok|sek|dkk|kr|dollars?|euros?|kroner?))/i,
   number: /\b\d[\d,. ]*\d\b/,
   temperature: /-?\d{1,3}\s?(?:°|deg|degrees?)\s?(?:c|f|celsius|fahrenheit)?/i,
   version: /\bv?\d+\.\d+(?:\.\d+)?(?:[-.]\w+)?\b/i,
@@ -65,7 +65,8 @@ function extractLeadingNumber(s: string): number | null {
 /** Split text into sentence-ish lines for scanning. */
 function toLines(text: string): string[] {
   return (text ?? '')
-    .replace(/\s+/g, ' ')
+    .replace(/[\t\f\v ]+/g, ' ')
+    .replace(/\r/g, '')
     .split(/(?<=[.!?])\s+|\n+|(?<=\d)\s{2,}/)
     .map((s) => s.trim())
     .filter((s) => s.length >= 8 && s.length <= 320);
@@ -88,18 +89,18 @@ const STOP = new Set(['the', 'price', 'cost', 'what', 'whats', 'is', 'are', 'of'
  *
  * `wantKind` can be passed when the caller already classified; otherwise it is inferred.
  */
-export function extractFreshFact(
+function collectFreshFactCandidates(
   query: string,
   sources: readonly ReadSource[],
   wantKind?: ExtractedFact['kind'] | null,
   options: { readonly strictSubject?: boolean } = {},
-): ExtractedFact | null {
+): Array<{ fact: ExtractedFact; score: number }> {
   const kind = wantKind ?? classifyFreshFactKind(query);
-  if (!kind) return null;
+  if (!kind) return [];
   const pattern = KIND_PATTERNS[kind];
   const subjects = subjectTokens(query);
 
-  let best: { fact: ExtractedFact; score: number } | null = null;
+  const candidates: Array<{ fact: ExtractedFact; score: number }> = [];
   for (const src of sources) {
     // Source-level relevance: the query subject may use a symbol ("btc") while the page
     // uses the name ("Bitcoin"), so we accept a figure-line when the SOURCE (title + text)
@@ -140,12 +141,39 @@ export function extractFreshFact(
         if (/\bprice\b|trading at|priced at|worth\b/.test(lower)) score += 2;
         if (/\b(market\s?cap|capitali|volume|supply|circulating|total value|ecosystem|24h vol)\b/.test(lower)) score -= 3;
       }
-      if (!best || score > best.score) {
-        best = { fact: { text: line, sourceIndex: src.index, kind }, score };
-      }
+      candidates.push({ fact: { text: line, sourceIndex: src.index, kind }, score });
     }
   }
-  return best?.fact ?? null;
+  return candidates.sort((a, b) => b.score - a.score || a.fact.sourceIndex - b.fact.sourceIndex);
+}
+
+export function extractFreshFact(
+  query: string,
+  sources: readonly ReadSource[],
+  wantKind?: ExtractedFact['kind'] | null,
+  options: { readonly strictSubject?: boolean } = {},
+): ExtractedFact | null {
+  return collectFreshFactCandidates(query, sources, wantKind, options)[0]?.fact ?? null;
+}
+
+/** Extract several distinct answer-bearing lines for menus/ticket tables with multiple prices. */
+export function extractFreshFacts(
+  query: string,
+  sources: readonly ReadSource[],
+  wantKind?: ExtractedFact['kind'] | null,
+  options: { readonly strictSubject?: boolean; readonly maxFacts?: number } = {},
+): ExtractedFact[] {
+  const maxFacts = Math.max(1, Math.min(12, options.maxFacts ?? 6));
+  const seen = new Set<string>();
+  const facts: ExtractedFact[] = [];
+  for (const candidate of collectFreshFactCandidates(query, sources, wantKind, options)) {
+    const key = candidate.fact.text.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    facts.push(candidate.fact);
+    if (facts.length >= maxFacts) break;
+  }
+  return facts;
 }
 
 /**

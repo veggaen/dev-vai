@@ -173,11 +173,28 @@ const JSDOM_DIR = resolve(coreRequire.resolve('jsdom/package.json'), '..');
 const jsdomClosure = copyPackageClosure('jsdom', resolve(JSDOM_DIR, '..'), RUNTIME_NODE_MODULES_DIR);
 console.log(`[sidecar]   copied ${jsdomClosure.size} packages for jsdom`);
 
+// pdf-parse delegates to pdfjs-dist and loads worker/canvas assets by package
+// location at runtime. Bundling it into bundle.cjs destroys that location and
+// makes packaged venue-menu PDF reads fail (DOMMatrix/PDFParse loader errors).
+// Keep it external and ship its complete dependency closure next to the bundle.
+console.log('[sidecar] Copying pdf-parse dependency closure (external - worker/canvas assets)...');
+const PDF_PARSE_DIR = resolvePackageRoot(coreRequire, 'pdf-parse');
+const pdfParseClosure = copyPackageClosure('pdf-parse', resolve(PDF_PARSE_DIR, '..'), RUNTIME_NODE_MODULES_DIR);
+console.log(`[sidecar]   copied ${pdfParseClosure.size} packages for pdf-parse`);
+
 console.log('[sidecar] Copying @huggingface/transformers dependency closure (external — onnx runtime)...');
 const runtimeRequire = createRequire(join(ROOT, 'packages/runtime/noop.js'));
 const XENOVA_DIR = resolvePackageRoot(runtimeRequire, '@huggingface/transformers');
 const xenovaClosure = copyPackageClosure('@huggingface/transformers', resolve(XENOVA_DIR, '..', '..'), RUNTIME_NODE_MODULES_DIR);
 console.log(`[sidecar]   copied ${xenovaClosure.size} packages for @huggingface/transformers`);
+
+// Runtime visual verification loads Playwright dynamically. The runtime bundle
+// keeps it external because Playwright resolves its own support files at
+// runtime, so ship the package and playwright-core next to bundle.cjs.
+console.log('[sidecar] Copying Playwright dependency closure (external — browser audits)...');
+const PLAYWRIGHT_DIR = resolvePackageRoot(runtimeRequire, 'playwright');
+const playwrightClosure = copyPackageClosure('playwright', resolve(PLAYWRIGHT_DIR, '..'), RUNTIME_NODE_MODULES_DIR);
+console.log(`[sidecar]   copied ${playwrightClosure.size} packages for Playwright`);
 
 // sharp ships native binaries via postinstall — copying the package alone is not enough.
 const packagedSharp = join(RUNTIME_NODE_MODULES_DIR, 'sharp');

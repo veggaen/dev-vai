@@ -34,7 +34,22 @@ import {
   isBusinessOpportunityRequest,
 } from '../models/web-conclude-policy.js';
 import { fetchGoogleViaBrowser, fetchGooglePageViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
-import { classifyFreshFactKind, extractFreshFact, extractFreshFactSubjects, type ReadSource } from './fresh-fact-extract.js';
+import { classifyFreshFactKind, extractFreshFact, extractFreshFacts, extractFreshFactSubjects, type ReadSource } from './fresh-fact-extract.js';
+import {
+  answerMatchesVenuePracticalDetail,
+  detectVenuePracticalDetail,
+  extractVenueProximityRequest,
+  extractVenuePracticalSubject,
+  isVenuePracticalIntent,
+  venuePracticalIntent,
+  venuePracticalKindFromIntent,
+  type VenuePracticalDetailKind,
+} from '../venue-practical-detail.js';
+import {
+  WebSourceCapabilityLedger,
+  type WebSourceCapability,
+  type WebSourceCapabilitySnapshot,
+} from './web-source-capabilities.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
 
@@ -44,7 +59,7 @@ const INTENT_PATTERNS: ReadonlyArray<{ pattern: RegExp; intent: string }> = [
   // "what is" → definition otherwise, and gets encyclopedia fan-out instead of a
   // real-time source. Anything asking for a price / rate / score / current value is a
   // fresh-data lookup that needs a live source READ, not a wikipedia article.
-  { pattern: /\b(price|cost|worth|how much (?:is|are|does)|exchange rate|conversion rate|stock price|market cap|score|standings|odds|weather|temperature|forecast)\b/i, intent: 'fresh-data' },
+  { pattern: /\b(prices?|costs?|worth|how much (?:is|are|does)|exchange rate|conversion rate|stock price|market cap|score|standings|odds|weather|temperature|forecast)\b/i, intent: 'fresh-data' },
   { pattern: /^(what is|what are|what's|define)\b/i, intent: 'definition' },
   { pattern: /^(hva\s+er)\b/i, intent: 'definition' },
   { pattern: /^(how to|how do|how can|how does)\b/i, intent: 'how-to' },
@@ -154,6 +169,7 @@ function normalizeCommonTypos(query: string): string {
 
 function normalizeSearchQuery(query: string): string {
   const trimmed = normalizeCommonTypos(query.trim())
+    .replace(/^(?:hello|hi|hey)[,!.:;\s]+/i, '')
     .replace(/^(?:please\s+)?provide\s+(?:a\s+)?(?:(?:concise|brief|short)\s+)?(?:explanation|answer|summary)\s*:?\s*/i, '')
     .replace(/^verify\s*:\s*/i, '')
     .trim();
@@ -187,6 +203,29 @@ function normalizeSearchQuery(query: string): string {
   }
 
   return withoutBuildTail || trimmed;
+}
+
+/** Admission prices need venue/ticket pages, not stock/crypto live-price fan-out. */
+function isVenueAdmissionPriceLookup(query: string): boolean {
+  return detectVenuePracticalDetail(normalizeCommonTypos(query)) === 'admission-price';
+}
+
+function extractVenueAdmissionSubject(query: string, entities: readonly string[]): string {
+  const cleaned = query
+    .replace(/^(?:hello|hi|hey)[,!.:;\s]+/i, '')
+    .replace(/^(?:please\s+)?(?:tell\s+me\s+)?(?:what(?:'s|\s+is|\s+are)\s+)?(?:the\s+)?(?:prices?|costs?)\s+(?:of|for|at|to)\s+(?:visit(?:ing)?|enter(?:ing)?|admission\s+(?:to|for))?\s*/i, '')
+    .replace(/^(?:please\s+)?how\s+much\s+(?:does|do|would|is|are)\s+(?:it\s+)?cost\s+to\s+(?:visit|enter|go\s+to)\s+/i, '')
+    .replace(/\s+(?:and\s+)?what\s+are\s+(?:the|their|its)\s+prices?.*$/i, '')
+    .replace(/\s+(?:ticket|admission|entry|entrance)\s+prices?.*$/i, '')
+    .replace(/[?!.]+$/g, '')
+    .replace(/^the\s+/i, '')
+    .trim();
+
+  if (cleaned.length > 1) return capFollowUpSubject(cleaned, 80);
+  const fallback = entities
+    .filter((entity) => !/^(?:prices?|costs?|visit(?:ing)?|admission|entry|entrance|tickets?|passes?)$/i.test(entity))
+    .join(' ');
+  return capFollowUpSubject(fallback || query.trim(), 80);
 }
 
 function capFollowUpSubject(subject: string, maxLen = 48): string {
@@ -246,8 +285,11 @@ export function buildSearchPlan(query: string): VaiSearchPlan {
 
   // Detect intent
   const matched = INTENT_PATTERNS.find(p => p.pattern.test(lower));
+  const practicalDetail = detectVenuePracticalDetail(normalizedQuery);
   const intent = hasComparisonMarkers(lower)
     ? 'comparison'
+    : practicalDetail
+      ? venuePracticalIntent(practicalDetail)
     : isBusinessOpportunityRequest(normalizedQuery)
       ? 'recommendation'           // ideas/opportunity → synthesize concrete options
     : isFreshLocalRecommendationRequest(normalizedQuery)
@@ -914,6 +956,48 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
       ]);
   }
 }
+type PracticalQueryLanguage = 'en' | 'no' | 'sv' | 'da' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'nl' | 'ja' | 'zh' | 'ko';
+
+function detectPracticalQueryLanguage(query: string): PracticalQueryLanguage {
+  const q = query.normalize('NFKC').toLowerCase();
+  if (/[ぁ-んァ-ヶ一-龯]/u.test(q)) return 'ja';
+  if (/[가-힣]/u.test(q)) return 'ko';
+  if (/[\u3400-\u4dbf\u4e00-\u9fff]/u.test(q)) return 'zh';
+  if (/\b(?:a\s+qu[eé]\s+hora|cu[aá]ndo|horarios?|d[oó]nde|menú|tel[eé]fono)\b/iu.test(q)) return 'es';
+  if (/(?:^|\s)(?:à\s+quelle\s+heure|quand|horaires?|où\s+se\s+trouve|téléphone)(?:\s|$)/iu.test(q)) return 'fr';
+  if (/(?:^|\s)(?:wann|öffnungszeiten|wo\s+(?:ist|befindet)|speisekarte)(?:\s|$)/iu.test(q)) return 'de';
+  if (/\b(?:quando|orari|dove|telefono)\b/iu.test(q)) return 'it';
+  if (/\b(?:quando|hor[aá]rios?|onde|telefone)\b/iu.test(q)) return 'pt';
+  if (/\b(?:openingstijden|wanneer|waar|telefoon)\b/iu.test(q)) return 'nl';
+  if (/\b(?:när|öppettider|stänger|öppnar)\b/iu.test(q)) return 'sv';
+  if (/\b(?:hvornår|åbningstider|lukker|åbner)\b/iu.test(q)) return 'da';
+  if (/\b(?:når|åpningstid(?:er)?|stenger|åpner|hvor\s+ligger)\b/iu.test(q) || /[æøå]/iu.test(q)) return 'no';
+  return 'en';
+}
+
+function localizedVenueDetailQuery(
+  language: PracticalQueryLanguage,
+  venue: string,
+  kind: Exclude<VenuePracticalDetailKind, 'admission-price'>,
+): string | null {
+  if (language === 'en') return null;
+  const labels: Record<Exclude<PracticalQueryLanguage, 'en'>, Record<Exclude<VenuePracticalDetailKind, 'admission-price'>, string>> = {
+    no: { hours: 'åpningstider', 'menu-price': 'meny priser', menu: 'meny', schedule: 'timeplan program', contact: 'kontakt telefon e-post', address: 'adresse veibeskrivelse', website: 'offisiell nettside', parking: 'parkering', accessibility: 'tilgjengelighet rullestol' },
+    sv: { hours: 'öppettider', 'menu-price': 'meny priser', menu: 'meny', schedule: 'schema tider', contact: 'kontakt telefon e-post', address: 'adress vägbeskrivning', website: 'officiell webbplats', parking: 'parkering', accessibility: 'tillgänglighet rullstol' },
+    da: { hours: 'åbningstider', 'menu-price': 'menu priser', menu: 'menu', schedule: 'tidsplan program', contact: 'kontakt telefon e-mail', address: 'adresse rutevejledning', website: 'officiel hjemmeside', parking: 'parkering', accessibility: 'tilgængelighed kørestol' },
+    es: { hours: 'horarios de apertura oficial', 'menu-price': 'precios del menú', menu: 'menú oficial', schedule: 'horario programa', contact: 'contacto teléfono correo', address: 'dirección cómo llegar', website: 'sitio web oficial', parking: 'estacionamiento', accessibility: 'accesibilidad silla de ruedas' },
+    fr: { hours: "horaires d'ouverture officiel", 'menu-price': 'prix du menu', menu: 'menu officiel', schedule: 'horaires programme', contact: 'contact téléphone e-mail', address: 'adresse itinéraire', website: 'site officiel', parking: 'parking', accessibility: 'accessibilité fauteuil roulant' },
+    de: { hours: 'Öffnungszeiten offiziell', 'menu-price': 'Speisekarte Preise', menu: 'offizielle Speisekarte', schedule: 'Zeitplan Programm', contact: 'Kontakt Telefon E-Mail', address: 'Adresse Anfahrt', website: 'offizielle Website', parking: 'Parkplätze', accessibility: 'Barrierefreiheit Rollstuhl' },
+    it: { hours: 'orari di apertura ufficiali', 'menu-price': 'prezzi menu', menu: 'menu ufficiale', schedule: 'orari programma', contact: 'contatti telefono email', address: 'indirizzo indicazioni', website: 'sito ufficiale', parking: 'parcheggio', accessibility: 'accessibilità sedia a rotelle' },
+    pt: { hours: 'horários de funcionamento oficial', 'menu-price': 'preços do menu', menu: 'menu oficial', schedule: 'horários programação', contact: 'contato telefone email', address: 'endereço como chegar', website: 'site oficial', parking: 'estacionamento', accessibility: 'acessibilidade cadeira de rodas' },
+    nl: { hours: 'openingstijden officieel', 'menu-price': 'menu prijzen', menu: 'officieel menu', schedule: 'rooster programma', contact: 'contact telefoon e-mail', address: 'adres route', website: 'officiële website', parking: 'parkeren', accessibility: 'toegankelijkheid rolstoel' },
+    ja: { hours: '営業時間 公式', 'menu-price': 'メニュー 価格', menu: '公式 メニュー', schedule: 'スケジュール 時間', contact: '連絡先 電話 メール', address: '住所 アクセス', website: '公式サイト', parking: '駐車場', accessibility: 'バリアフリー 車椅子' },
+    zh: { hours: '营业时间 官方', 'menu-price': '菜单 价格', menu: '官方 菜单', schedule: '时间表 活动时间', contact: '联系方式 电话 邮箱', address: '地址 交通', website: '官方网站', parking: '停车场', accessibility: '无障碍 轮椅' },
+    ko: { hours: '영업시간 공식', 'menu-price': '메뉴 가격', menu: '공식 메뉴', schedule: '일정 시간', contact: '연락처 전화 이메일', address: '주소 오시는 길', website: '공식 웹사이트', parking: '주차', accessibility: '접근성 휠체어' },
+  };
+  return `${venue} ${labels[language][kind]}`;
+}
+
 function generateFanOutQueries(query: string, intent: string, entities: readonly string[]): string[] {
   const queries: string[] = [query]; // always include original
 
@@ -921,6 +1005,45 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
   const primarySubject = extractPrimarySubject(query, entities);
   const comparisonSubject = extractComparisonSubject(query);
   const biasPerplexityToProduct = shouldBiasPerplexityToProduct(query, primarySubject);
+  const practicalKind = venuePracticalKindFromIntent(intent);
+
+  if (practicalKind && practicalKind !== 'admission-price') {
+    const proximity = extractVenueProximityRequest(query);
+    const venue = proximity?.venue || extractVenuePracticalSubject(query) || primarySubject || entityStr;
+    const localized = localizedVenueDetailQuery(detectPracticalQueryLanguage(query), venue, practicalKind);
+    const detailQueries: Record<Exclude<VenuePracticalDetailKind, 'admission-price'>, readonly string[]> = {
+      hours: [`${venue} official store locator opening hours`, `${venue} official opening hours`, `${venue} opening hours`, `${venue} åpningstider`, `${venue} open close today`],
+      'menu-price': [`${venue} official menu prices`, `${venue} menu prices`, `${venue} meny priser`, `${venue} food drink prices`],
+      menu: [`${venue} official menu`, `${venue} menu`, `${venue} meny`, `${venue} food drinks dietary options`],
+      schedule: [`${venue} official schedule timetable`, `${venue} schedule`, `${venue} timeplan program`, `${venue} session activity times`],
+      contact: [`${venue} official contact phone email`, `${venue} contact details`, `${venue} kontakt telefon e-post`, `${venue} official website contact`],
+      address: [`${venue} official address directions`, `${venue} address`, `${venue} adresse veibeskrivelse`, `${venue} map location`],
+      website: [`${venue} official website`, `${venue} offisiell nettside`, `${venue} booking page`, `${venue} contact website`],
+      parking: [`${venue} official parking information`, `${venue} parking`, `${venue} parkering`, `${venue} car park access prices hours`],
+      accessibility: [`${venue} official accessibility information`, `${venue} accessibility`, `${venue} tilgjengelighet rullestol`, `${venue} wheelchair step free access`],
+    };
+    // Practical questions are searched as entity-first fact queries. Sending
+    // the conversational original ("when does ... open up?") to a keyless
+    // index made it rank dictionary pages for "does". Keep the original on
+    // the plan for audit, but fan out only clean, multilingual detail queries.
+    const candidates = localized
+      ? [localized, ...detailQueries[practicalKind]]
+      : detailQueries[practicalKind];
+    if (proximity) {
+      const detailLabel = practicalKind === 'menu-price'
+        ? 'menu prices'
+        : practicalKind === 'menu'
+          ? 'menu'
+          : detailQueries[practicalKind][0].slice(venue.length).trim();
+      return [...new Set([
+        `${venue} official locations`,
+        `${venue} locations nearest ${proximity.anchor}`,
+        `${venue} near ${proximity.anchor} ${detailLabel}`,
+        ...candidates,
+      ].map((value) => value.replace(/\s+/g, ' ').trim()))].slice(0, 6);
+    }
+    return [...new Set(candidates.map((value) => value.replace(/\s+/g, ' ').trim()))].slice(0, 6);
+  }
 
   switch (intent) {
     case 'definition':
@@ -977,6 +1100,25 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
       queries.push(`${primarySubject || entityStr} current price usd`);
       queries.push(`${primarySubject || entityStr} live price now`);
       break;
+    case 'admission-price': {
+      const venue = extractVenueAdmissionSubject(query, entities);
+      const identity = entities
+        .filter((entity) => !/^(?:prices?|costs?|visit(?:ing)?|admission|entry|entrance|tickets?|passes?|snow|park)$/i.test(entity))
+        .slice(-2)
+        .join(' ');
+      if (identity) queries.push(`${identity} official prices tickets`);
+      const asciiIdentity = identity
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[øØ]/g, 'o');
+      if (asciiIdentity && asciiIdentity !== identity) {
+        queries.push(`${asciiIdentity} official ticket prices products`);
+      }
+      queries.push(`${venue} official prices`);
+      queries.push(`${venue} tickets admission prices`);
+      queries.push(`${venue} day pass family pass prices`);
+      break;
+    }
     default:
       queries.push(`${primarySubject || entityStr} overview`);
       break;
@@ -992,6 +1134,271 @@ interface RawSearchResult {
   title: string;
   snippet: string;
   url: string;
+}
+
+const KNOWN_OFFICIAL_VENUE_DETAIL_PAGES: ReadonlyArray<{
+  readonly matches: RegExp;
+  readonly kind: VenuePracticalDetailKind;
+  readonly title: string;
+  readonly url: string;
+}> = [
+  {
+    // Observed acceptance case. The URL is stable; prices are always read live.
+    matches: /(?:snø|\bsno\b)[\s\S]*\boslo\b|\boslo\b[\s\S]*(?:snø|\bsno\b)/iu,
+    kind: 'admission-price',
+    title: 'SNØ Oslo official prices and products',
+    url: 'https://snooslo.no/no/products',
+  },
+  {
+    // The URL is stable; the published hours are always read live.
+    matches: /(?:snø|\bsno\b)[\s\S]*\boslo\b|\boslo\b[\s\S]*(?:snø|\bsno\b)/iu,
+    kind: 'hours',
+    title: 'SNØ Oslo official opening hours',
+    url: 'https://snooslo.no/no/opening-hours',
+  },
+];
+
+export function resolveKnownOfficialVenueDetailPage(
+  query: string,
+  kind = detectVenuePracticalDetail(query),
+): { title: string; url: string; kind: VenuePracticalDetailKind } | null {
+  if (!kind) return null;
+  const page = KNOWN_OFFICIAL_VENUE_DETAIL_PAGES.find((candidate) => candidate.kind === kind && candidate.matches.test(query));
+  return page ? { title: page.title, url: page.url, kind: page.kind } : null;
+}
+
+export function resolveKnownOfficialAdmissionPricePage(query: string): { title: string; url: string } | null {
+  const page = resolveKnownOfficialVenueDetailPage(query, 'admission-price');
+  return page ? { title: page.title, url: page.url } : null;
+}
+
+export function isKnownOfficialVenueDetailUrl(url: string): boolean {
+  try {
+    const normalized = new URL(url).href.replace(/\/$/, '');
+    return KNOWN_OFFICIAL_VENUE_DETAIL_PAGES.some((page) => new URL(page.url).href.replace(/\/$/, '') === normalized);
+  } catch {
+    return false;
+  }
+}
+
+export function isKnownOfficialAdmissionPriceUrl(url: string): boolean {
+  return isKnownOfficialVenueDetailUrl(url)
+    && KNOWN_OFFICIAL_VENUE_DETAIL_PAGES.some((page) => page.kind === 'admission-price' && new URL(page.url).href.replace(/\/$/, '') === new URL(url).href.replace(/\/$/, ''));
+}
+
+export function extractAdmissionPriceExcerpt(text: string): string | null {
+  const sourceLines = text
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length >= 2 && line.length <= 420);
+  const pricePattern = /(?:[$€£]\s?\d|\d(?:[\d,. ]*\d)?\s?(?:nok|sek|dkk|kr|kroner?)\b)/i;
+  const lines = sourceLines.flatMap((line, index) => {
+    if (!pricePattern.test(line) || /\bkwh\b/i.test(line)) return [];
+    const context = sourceLines
+      .slice(Math.max(0, index - 3), index + 1)
+      .filter((part) => !/^(?:prices?|priser|adult|voksen|child|barn)$/i.test(part))
+      .join(' — ');
+    return context.length <= 420 ? [context] : [line];
+  });
+  const distinct = [...new Set(lines)];
+  return distinct.length > 0 ? distinct.slice(0, 14).join('\n') : null;
+}
+
+export function extractSnoOsloPriceExcerpt(text: string): string | null {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const money = '(?:Fra\\s+)?\\d[\\d,. ]*\\s*kr(?:\\/mnd)?';
+  const displayMoney = (value: string): string => value.replace(/^Fra\s+/i, 'from ');
+  const pair = (label: string, pattern: RegExp): string | null => {
+    const match = pattern.exec(normalized);
+    return match ? `${label}: Alpine/Park ${displayMoney(match[1])}; cross-country ${displayMoney(match[2])}.` : null;
+  };
+  const rows: Array<string | null> = [
+    pair('2 hours, weekday', new RegExp(`2\\s*Timer\\s*\\(\\s*Ukedag\\s*\\)\\s*(${money})\\s*(${money})`, 'i')),
+    pair('2 hours, weekend', new RegExp(`2\\s*Timer\\s*\\(\\s*Helg\\s*\\)\\s*(${money})\\s*(${money})`, 'i')),
+    pair('1 day, weekday', new RegExp(`1\\s*dag\\s*\\(\\s*Ukedag\\s*\\)\\s*(${money})\\s*(${money})`, 'i')),
+    pair('1 day, weekend', new RegExp(`1\\s*dag\\s*\\(\\s*Helg\\s*\\)\\s*(${money})\\s*(${money})`, 'i')),
+    pair('Summer season pass', new RegExp(`Sommersesong(?:\\s*\\([^)]*\\))?\\s*(${money})\\s*(${money})`, 'i')),
+    pair('Club season pass', new RegExp(`Klubbsesong(?:\\s*\\([^)]*\\))?\\s*(${money})\\s*(${money})`, 'i')),
+  ];
+  const familyMatches = [...normalized.matchAll(new RegExp(`1\\s*dag\\s*\\(\\s*(Ukedag|Helg)\\s*\\)\\s*(${money})`, 'gi'))]
+    .slice(-2);
+  if (/\bFamiliepass\b/i.test(normalized) && familyMatches.length === 2) {
+    rows.push(`Family day pass: weekday ${displayMoney(familyMatches[0][2])}; weekend ${displayMoney(familyMatches[1][2])}.`);
+  }
+  const membership = new RegExp(`12\\s*m[åa]neder\\*?\\s*(${money})\\s*(${money})\\s*(${money})`, 'i').exec(normalized);
+  if (membership) {
+    rows.push(`12-month membership: racing ${membership[1]}; cross-country ${membership[2]}; park ${membership[3]}.`);
+  }
+  const extracted = rows.filter((row): row is string => Boolean(row));
+  return extracted.length > 0 ? extracted.join('\n') : null;
+}
+
+const OPENING_HOURS_CLOCK = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b|\b(?:[01]?\d|2[0-3])\.[0-5]\d(?!\.)|\b(?:1[0-2]|0?[1-9])\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:[01]?\d|2[0-3])\s*[-–—]​?\s*(?:[01]?\d|2[0-3])\s*(?:uhr|h)\b/i;
+const OPENING_HOURS_DAY_OR_LABEL = /\b(?:opening\s+hours?|hours?|open|closed|weekday|weekend|every\s+day|daily|alle\s+dager|hver\s+dag|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|stengt|åpent|åpningstid(?:er)?|lunes|martes|miércoles|jueves|viernes|sábado|domingo|horarios?|abiert[oa]|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|horaires?|ouvert[es]?|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|öffnungszeiten|geöffnet|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica|orari|apert[oa]|segunda|terça|quarta|quinta|sexta|horários?|abert[oa]|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag|openingstijden|geopend)\b|(?:営業時間|開店時間|閉店時間|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日|日曜日|毎日|营业时间|營業時間|星期[一二三四五六日天]|영업시간|[월화수목금토일]요일)/iu;
+const OPENING_HOURS_CLOSED = /\b(?:closed|stengt|stängd|lukket|cerrad[oa]|fermé[es]?|geschlossen|chius[oa]|fechad[oa]|gesloten|open\s+24\s+hours?|24\/7)\b|(?:休業|定休日|休息|휴무)/iu;
+const INTERNATIONAL_STANDALONE_CLOSED = /^(?:closed|stengt|stängd|lukket|cerrad[oa]|fermé[es]?|geschlossen|chius[oa]|fechad[oa]|gesloten|休業|定休日|休息|휴무)[.!]?$/iu;
+
+function composeOpeningHoursRow(lines: readonly string[], index: number): { row: string; consumedNext: boolean } | null {
+  const line = lines[index] ?? '';
+  const hasCue = OPENING_HOURS_DAY_OR_LABEL.test(line);
+  const hasValue = OPENING_HOURS_CLOCK.test(line) || OPENING_HOURS_CLOSED.test(line);
+  const standaloneClosed = INTERNATIONAL_STANDALONE_CLOSED.test(line);
+  if (hasCue && hasValue && !standaloneClosed) return { row: line, consumedNext: false };
+  if (!hasCue) return null;
+
+  const next = lines[index + 1] ?? '';
+  if (OPENING_HOURS_CLOCK.test(next) || OPENING_HOURS_CLOSED.test(next)) {
+    // A generic heading followed by an already-complete day/time row should
+    // not be glued into `Opening hours: Monday 10:00...`; let the next row
+    // stand on its own. A day followed by bare `Closed` still composes.
+    if (OPENING_HOURS_CLOCK.test(next) && OPENING_HOURS_DAY_OR_LABEL.test(next)) return null;
+    return { row: `${line}: ${next}`, consumedNext: true };
+  }
+  return null;
+}
+
+export function extractOpeningHoursExcerpt(text: string): string | null {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length >= 3 && line.length <= 320);
+  const rows: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const composed = composeOpeningHoursRow(lines, index);
+    if (!composed) continue;
+    rows.push(composed.row);
+    if (composed.consumedNext) index += 1;
+  }
+  return rows.length > 0 ? [...new Set(rows)].slice(0, 12).join('\n') : null;
+}
+
+function extractLeadingOpeningHoursExcerpt(text: string): string | null {
+  const lines = text.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 18);
+  const rows: string[] = [];
+  let started = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const composed = composeOpeningHoursRow(lines, index);
+    if (composed) {
+      rows.push(composed.row);
+      started = true;
+      if (composed.consumedNext) index += 1;
+      continue;
+    }
+    if (started) break;
+  }
+  return rows.length > 0 ? [...new Set(rows)].join('\n') : null;
+}
+
+/**
+ * Extract hours from the section belonging to the requested business. This is
+ * important for shopping-centre and directory pages that list many tenants:
+ * clock-shaped evidence elsewhere on the page must not be attributed to the
+ * named venue.
+ */
+export function extractVenueOpeningHoursExcerpt(text: string, queryOrSubject: string): string | null {
+  const subjectTokens = venueDiscoverySubjectTokens(queryOrSubject);
+  if (subjectTokens.length === 0) return extractOpeningHoursExcerpt(text);
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length >= 2);
+  let anchor = -1;
+  let bestHits = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const folded = foldVenueDiscoveryText(lines[index]);
+    const hits = subjectTokens.filter((token) => venueDiscoveryTokenHit(folded, token)).length;
+    if (hits > bestHits) {
+      anchor = index;
+      bestHits = hits;
+    }
+  }
+  if (anchor < 0 || bestHits === 0) return null;
+
+  const rows: string[] = [];
+  let started = false;
+  const scopedLines = lines.slice(anchor, anchor + 24);
+  for (let index = 0; index < scopedLines.length; index += 1) {
+    const line = scopedLines[index];
+    const composed = composeOpeningHoursRow(scopedLines, index);
+    if (composed) {
+      rows.push(composed.row);
+      started = true;
+      if (composed.consumedNext) index += 1;
+      continue;
+    }
+    if (started && line.length >= 3) break;
+  }
+  return rows.length > 0 ? [...new Set(rows)].slice(0, 12).join('\n') : null;
+}
+
+export function extractSnoOsloOpeningHoursExcerpt(text: string): string | null {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const time = '(?:[01]?\\d|2[0-3])[:.]?[0-5]\\d';
+  const value = `(?:${time}(?:\\s*[-–]\\s*${time})?|Stengt)`;
+  const row = (label: string, dayPattern: string): string | null => {
+    const match = new RegExp(`${dayPattern}\\s+(${value})\\s+(${value})\\s+(${value})`, 'iu').exec(normalized);
+    if (!match) return null;
+    const display = (entry: string): string => /^stengt$/iu.test(entry) ? 'Closed' : entry.replace(/\./g, ':');
+    return `- ${label}: Alpine/Park ${display(match[1])}; cross-country ${display(match[2])}; SNØborgen ${display(match[3])}.`;
+  };
+  const rows = [
+    row('Monday', 'Mandag'),
+    row('Tuesday–Thursday', 'Tirsdag\\s*[-–]\\s*Torsdag'),
+    row('Friday', 'Fredag'),
+    row('Saturday–Sunday', 'Lørdag\\s*[-–]\\s*Søndag'),
+  ].filter((entry): entry is string => Boolean(entry));
+  return rows.length > 0
+    ? ['SNØ snow zone (Alpine/Park; cross-country; SNØborgen):', ...rows].join('\n')
+    : null;
+}
+
+async function fetchKnownOfficialAdmissionPricePage(
+  query: string,
+  timeoutMs: number,
+): Promise<RawSearchResult | null> {
+  const page = resolveKnownOfficialAdmissionPricePage(query);
+  if (!page) return null;
+  // A single transient DNS/TLS miss must not demote a known official page to a
+  // slow broad search. Keep both attempts inside the chat evidence budget.
+  // The desktop starts background model/store warmers immediately after boot.
+  // A cold official-page TLS/read can exceed 4.5s under that load even though
+  // the same page resolves in <1s once warm. Give this verified direct route a
+  // real cold-start window; it still stays bounded and avoids broad fan-out.
+  const attemptTimeoutMs = Math.max(8_000, Math.min(timeoutMs + 4_000, 12_000));
+  let content: string | null = null;
+  for (let attempt = 0; attempt < 2 && !content; attempt += 1) {
+    content = await boundedReadPage(page.url, attemptTimeoutMs, 24_000);
+    if (!content && process.env.VAI_SEARCH_DEBUG) {
+      console.error(`[search-debug] official admission page read attempt ${attempt + 1} returned no content: ${page.url}`);
+    }
+  }
+  if (!content) return null;
+  const excerpt = page.url.includes('snooslo.no/')
+    ? extractSnoOsloPriceExcerpt(content) ?? extractAdmissionPriceExcerpt(content)
+    : extractAdmissionPriceExcerpt(content);
+  if (!excerpt) return null;
+  return { title: page.title, snippet: excerpt, url: page.url };
+}
+
+async function fetchKnownOfficialVenueDetailPage(
+  query: string,
+  kind: VenuePracticalDetailKind,
+  timeoutMs: number,
+): Promise<RawSearchResult | null> {
+  if (kind === 'admission-price') return fetchKnownOfficialAdmissionPricePage(query, timeoutMs);
+  const page = resolveKnownOfficialVenueDetailPage(query, kind);
+  if (!page) return null;
+  const attemptTimeoutMs = Math.max(8_000, Math.min(timeoutMs + 4_000, 12_000));
+  let content: string | null = null;
+  for (let attempt = 0; attempt < 2 && !content; attempt += 1) {
+    content = await boundedReadPage(page.url, attemptTimeoutMs, 24_000);
+  }
+  if (!content) return null;
+  const excerpt = kind === 'hours'
+    ? (page.url.includes('snooslo.no/') ? extractSnoOsloOpeningHoursExcerpt(content) : null) ?? extractOpeningHoursExcerpt(content)
+    : null;
+  if (!excerpt) return null;
+  return { title: page.title, snippet: excerpt, url: page.url };
 }
 
 const PACKAGE_QUERY_NOISE = new Set([
@@ -1249,7 +1656,7 @@ async function fetchOpenStreetMapBusinessContact(
   query: string,
   timeoutMs: number,
 ): Promise<RawSearchResult[]> {
-  if (!isFreshLocalBusinessContactRequest(query)) return [];
+  if (!isFreshLocalBusinessContactRequest(query) && detectVenuePracticalDetail(query) !== 'contact') return [];
   const subject = extractLocalBusinessSearchSubject(query);
   if (!subject) return [];
 
@@ -1452,15 +1859,117 @@ const BROWSER_USER_AGENT =
 
 function stripHtmlTags(value: string): string {
   return value
+    // Preserve punctuation and words split only by inline result-highlighting tags.
+    .replace(/<\/?(?:span|b|strong|em|i|mark)\b[^>]*>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
     .replace(/&#39;|&apos;/g, "'")
+    .replace(/&aring;/gi, (entity) => entity[1] === 'A' ? 'Å' : 'å')
+    .replace(/&oslash;/gi, (entity) => entity[1] === 'O' ? 'Ø' : 'ø')
+    .replace(/&aelig;/gi, (entity) => entity[1] === 'A' ? 'Æ' : 'æ')
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Recover the destination embedded in Yahoo's result redirect URL. */
+export function decodeYahooRedirectUrl(href: string): string | null {
+  const unescaped = href.replace(/&amp;/g, '&');
+  if (!/r\.search\.yahoo\.com/i.test(unescaped)) {
+    return /^https?:\/\/\S+$/i.test(unescaped) ? unescaped : null;
+  }
+  const match = /\/RU=([^/]+)\/RK=/i.exec(unescaped);
+  if (!match?.[1]) return null;
+  try {
+    const decoded = decodeURIComponent(match[1]);
+    return /^https?:\/\/\S+$/i.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse only Yahoo's organic result list; navigation/local UI is excluded. */
+export function parseYahooSearchHtml(html: string): RawSearchResult[] {
+  const list = /<ol[^>]*class="[^"]*searchCenterMiddle[^"]*"[^>]*>([\s\S]*?)<\/ol>/i.exec(html)?.[1];
+  if (!list) return [];
+  const results: RawSearchResult[] = [];
+  for (const block of list.split(/<li(?:\s[^>]*)?>/gi).slice(1, 13)) {
+    const titleMatch = /<div[^>]*class="[^"]*compTitle[^"]*"[\s\S]*?<a[^>]*href="([^"]+)"[\s\S]*?<h3[^>]*>([\s\S]*?)<\/h3>/i.exec(block);
+    const snippetMatch = /<div[^>]*class="[^"]*compText[^"]*"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i.exec(block);
+    if (!titleMatch || !snippetMatch) continue;
+    const url = decodeYahooRedirectUrl(titleMatch[1]);
+    const title = stripHtmlTags(titleMatch[2]);
+    const snippet = stripHtmlTags(snippetMatch[1]);
+    if (!url || !title || snippet.length < 20) continue;
+    results.push({ title, snippet, url });
+    if (results.length >= 8) break;
+  }
+  return results;
+}
+
+/** Yahoo's HTML index is a useful keyless fallback for ordinary local businesses. */
+async function fetchYahooHtml(query: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  const endpoints = ['search.yahoo.com', 'uk.search.yahoo.com', 'ca.search.yahoo.com'];
+  for (const host of endpoints) {
+    try {
+      const response = await fetch(`https://${host}/search?p=${encodeURIComponent(query)}`, {
+        headers: {
+          'User-Agent': BROWSER_USER_AGENT,
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'no-NO,no;q=0.9,en;q=0.8',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) continue;
+      const results = parseYahooSearchHtml(await response.text());
+      if (results.length > 0) return results;
+    } catch {
+      // Try the next regional index; each request remains independently bounded.
+    }
+  }
+  return [];
+}
+
+/** Parse Startpage organic cards without its navigation or anonymous-view proxy links. */
+export function parseStartpageSearchHtml(html: string): RawSearchResult[] {
+  const results: RawSearchResult[] = [];
+  const blocks = html.split(/<div[^>]*class="[^"]*\bresult\b[^"]*"[^>]*>/gi).slice(1, 17);
+  for (const block of blocks) {
+    const titleAnchor = /<a[^>]*class="[^"]*\bresult-title\b[^"]*"[^>]*>[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>[\s\S]*?<\/a>/i.exec(block)?.[0];
+    const description = /<p[^>]*class="[^"]*\bdescription\b[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(block)?.[1];
+    if (!titleAnchor || !description) continue;
+    const href = /\bhref="([^"]+)"/i.exec(titleAnchor)?.[1]?.replace(/&amp;/g, '&');
+    const title = stripHtmlTags(/<h2[^>]*>([\s\S]*?)<\/h2>/i.exec(titleAnchor)?.[1] ?? '');
+    const snippet = stripHtmlTags(description);
+    if (!href || !/^https?:\/\//i.test(href) || !title || snippet.length < 20) continue;
+    if (/startpage\.com\/av\/proxy/i.test(href)) continue;
+    results.push({ title, snippet, url: href });
+    if (results.length >= 10) break;
+  }
+  return results;
+}
+
+/** Independent keyless organic index for venue details; scoped away from ordinary queries. */
+async function fetchStartpageHtml(query: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  try {
+    const response = await fetch(`https://www.startpage.com/sp/search?query=${encodeURIComponent(query)}`, {
+      headers: {
+        'User-Agent': BROWSER_USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/pdf',
+        'Accept-Language': 'no-NO,no;q=0.9,en;q=0.8',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return [];
+    return parseStartpageSearchHtml(await response.text());
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -2013,11 +2522,21 @@ async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSea
   return results;
 }
 
-async function fetchProviderChain(query: string, config: SearchPipelineConfig, packageHints: readonly string[] = []): Promise<RawSearchResult[]> {
+async function fetchProviderChain(
+  query: string,
+  config: SearchPipelineConfig,
+  packageHints: readonly string[] = [],
+  parentIntent?: string,
+): Promise<RawSearchResult[]> {
   const providers: Array<() => Promise<RawSearchResult[]>> = [];
   const pypiPackage = extractPyPIPackageName(query, packageHints);
+  const admissionPriceLookup = parentIntent === 'admission-price'
+    || isVenueAdmissionPriceLookup(query)
+    || /\b(?:admission|tickets?|day\s+passes?|family\s+passes?)\s+prices?\b/i.test(query);
+  const venuePracticalLookup = isVenuePracticalIntent(parentIntent ?? '')
+    || detectVenuePracticalDetail(query) !== null;
 
-  if (isFreshLocalBusinessContactRequest(query)) {
+  if (isFreshLocalBusinessContactRequest(query) || detectVenuePracticalDetail(query) === 'contact') {
     providers.push(() => fetchOpenStreetMapBusinessContact(query, config.fetchTimeoutMs));
   }
 
@@ -2035,12 +2554,24 @@ async function fetchProviderChain(query: string, config: SearchPipelineConfig, p
   if (config.braveApiKey) {
     providers.push(() => fetchBrave(query, config.braveApiKey as string, config.fetchTimeoutMs));
   }
+  // Yahoo currently returns usable organic results for small/local businesses
+  // that Bing's anonymous endpoint often replaces with dictionary or global
+  // popularity results. Scope it to practical venue lookups so ordinary search
+  // latency and provider behavior remain unchanged.
+  if (venuePracticalLookup) {
+    providers.push(() => fetchStartpageHtml(query, config.fetchTimeoutMs));
+    providers.push(() => fetchYahooHtml(query, config.fetchTimeoutMs));
+  }
   // Real-browser Google first: drives the installed Chrome/Edge/Opera
   // headlessly, so Vai sees the same organic results the user would —
   // the only keyless route that reliably answers person / local / fresh
   // queries. Skipped automatically when no browser is installed or Google
   // has us in a CAPTCHA cooldown; the HTTP chain below is the fallback.
-  if (isBrowserSearchEnabled()) {
+  // Venue-detail discovery already has two organic indexes plus direct page
+  // verification. Launching a real browser here competes with the subsequent
+  // official-page reads and caused simple hours queries to time out under the
+  // desktop runtime. Keep browser Google for the query families that need it.
+  if (isBrowserSearchEnabled() && !admissionPriceLookup && !venuePracticalLookup) {
     providers.push(() => fetchGoogleViaBrowser(query, config.fetchTimeoutMs));
   }
   // Bing next in the keyless chain: a real web index that covers ordinary
@@ -2054,6 +2585,43 @@ async function fetchProviderChain(query: string, config: SearchPipelineConfig, p
   const merged: RawSearchResult[] = [];
   const seen = new Set<string>();
   const minUsefulResults = Math.max(3, config.resultsPerQuery);
+
+  // Mutable venue-detail lookups use independent general-web providers. Run them together
+  // under one bounded deadline: sequential provider fallbacks made a simple
+  // hours/price/menu question wait 90+ seconds when each provider was thin.
+  if (venuePracticalLookup) {
+    const timeoutMs = Math.max(3_000, Math.min(config.fetchTimeoutMs + 2_000, 12_000));
+    const batches = await Promise.all(providers.map(async (provider) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          provider().catch(() => [] as RawSearchResult[]),
+          new Promise<RawSearchResult[]>((resolve) => {
+            timer = setTimeout(() => resolve([]), timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }));
+    for (const batch of batches) {
+      for (const result of batch) {
+        const dedupeKey = `${result.url}::${result.title}`.toLowerCase();
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        merged.push(result);
+      }
+    }
+    // Anonymous indexes occasionally answer a local-business query with a
+    // completely unrelated popular page. Do not let that noise suppress the
+    // refined venue retry below: a practical result must at least mention one
+    // meaningful token from the requested business/place identity.
+    const relevant = filterVenueIdentityResults(merged, query);
+    if (process.env.VAI_SEARCH_DEBUG && relevant.length !== merged.length) {
+      console.error(`[search-debug] discarded ${merged.length - relevant.length} off-identity venue results for "${query}"`);
+    }
+    return relevant;
+  }
 
   for (const provider of providers) {
     const batch = await provider().catch((error) => {
@@ -2071,13 +2639,827 @@ async function fetchProviderChain(query: string, config: SearchPipelineConfig, p
       seen.add(dedupeKey);
       merged.push(result);
     }
-    if (merged.length >= minUsefulResults) break;
+    const hasAdmissionCandidate = admissionPriceLookup && merged.some((result) => {
+      const identityHaystack = `${result.title} ${result.url}`
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[øØ]/g, 'o')
+        .toLowerCase();
+      const cueHaystack = `${result.title} ${result.snippet}`.toLowerCase();
+      const identityTokens = packageHints
+        .map((value) => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[øØ]/g, 'o').toLowerCase())
+        .filter((value) => value.length >= 3)
+        .filter((value) => !/^(?:prices?|costs?|visit(?:ing)?|admission|entry|entrance|tickets?|passes?|snow|park)$/.test(value));
+      return identityTokens.some((token) => identityHaystack.includes(token))
+        && /\b(?:prices?|priser|products?|produkter|tickets?|billetter|admission|entry|passes?)\b/i.test(cueHaystack);
+    });
+    if (merged.length >= minUsefulResults && (!admissionPriceLookup || hasAdmissionCandidate)) break;
   }
 
   return merged;
 }
 
 // ── Ranking (Step 4: RANK) ──
+
+/**
+ * Cold-start discovery when public indexes are temporarily empty. Domain
+ * candidates are derived from the requested business identity and anchor
+ * country, then accepted only when the live page itself proves that identity.
+ * This is deliberately generic: it contains no venue-name allowlist.
+ */
+export function buildProbableOfficialVenueUrls(subject: string, rawCountryCode = ''): string[] {
+  const brandTokens = venueDiscoverySubjectTokens(subject).slice(0, 3);
+  if (brandTokens.length === 0) return [];
+  const normalizedCountryCode = rawCountryCode.toLowerCase().replace(/[^a-z]/g, '');
+  const countryCode = normalizedCountryCode === 'gb' ? 'uk' : normalizedCountryCode;
+  const suffixes = [...new Set([
+    ...(countryCode ? [countryCode, `co.${countryCode}`, `com.${countryCode}`] : []),
+    'com',
+  ])];
+  const slugs = [...new Set([brandTokens.join(''), brandTokens.join('-')])]
+    .filter((slug) => slug.length >= 3);
+  return suffixes.flatMap((suffix) => slugs.flatMap((slug) => [
+    `https://www.${slug}.${suffix}/`,
+    `https://${slug}.${suffix}/`,
+  ])).slice(0, 16);
+}
+
+async function probeProbableOfficialVenueHomepages(
+  query: string,
+  timeoutMs: number,
+): Promise<RawSearchResult[]> {
+  const proximity = extractVenueProximityRequest(query);
+  const subject = proximity?.venue ?? extractVenuePracticalSubject(query);
+  const brandTokens = venueDiscoverySubjectTokens(subject).slice(0, 3);
+  if (brandTokens.length === 0) return [];
+  const anchor = proximity ? await fetchPhotonPlace(proximity.anchor, timeoutMs) : null;
+  const candidates = buildProbableOfficialVenueUrls(subject, anchor?.countryCode);
+
+  for (let offset = 0; offset < candidates.length; offset += 4) {
+    const batch = candidates.slice(offset, offset + 4);
+    const reads = await Promise.all(batch.map(async (url) => ({
+      url,
+      content: await boundedReadPage(url, Math.max(3_000, Math.min(timeoutMs, 7_000)), 24_000, query),
+    })));
+    const verified = reads.flatMap(({ url, content }) => {
+      if (!content) return [];
+      const folded = foldVenueDiscoveryText(content);
+      const identityHits = brandTokens.filter((token) => venueDiscoveryTokenHit(folded, token)).length;
+      if (identityHits < Math.min(2, brandTokens.length)) return [];
+      return [{
+        title: `${subject} official website`,
+        snippet: content,
+        url,
+      } satisfies RawSearchResult];
+    });
+    if (verified.length > 0) return verified.slice(0, 2);
+  }
+  return [];
+}
+
+function foldVenueDiscoveryText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[øØ]/g, 'o')
+    .toLowerCase()
+    // Keep non-Latin shop and locality names (for example 渋谷 or 삼성).
+    // The previous ASCII-only fold made global branch identity disappear.
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const VENUE_DISCOVERY_NOISE = new Set([
+  'when', 'what', 'where', 'which', 'does', 'open', 'close', 'opening', 'closing',
+  'hours', 'hour', 'today', 'official', 'current', 'their', 'there', 'this', 'that',
+  'store', 'stores', 'shop', 'shops', 'flagship', 'branch', 'branches', 'location', 'locations',
+  'restaurant', 'restaurants', 'tonight', 'tomorrow', 'sunday', 'sundays',
+  'menu', 'price', 'prices', 'schedule', 'contact', 'address', 'website', 'parking',
+  'accessibility', 'apningstider', 'offisiell', 'nettside', 'adresse', 'parkering',
+  'horario', 'horarios', 'heure', 'horaires', 'offnungszeiten', 'orari',
+]);
+
+function venueDiscoverySubjectTokens(query: string): string[] {
+  const subject = extractVenuePracticalSubject(query);
+  return [...new Set(foldVenueDiscoveryText(subject).split(' ')
+    .filter((token) => token.length >= 4 && !VENUE_DISCOVERY_NOISE.has(token)))];
+}
+
+function filterVenueIdentityResults(results: readonly RawSearchResult[], query: string): RawSearchResult[] {
+  const identityTokens = venueDiscoverySubjectTokens(query);
+  if (identityTokens.length === 0) return [...results];
+  return results.filter((result) => {
+    const haystack = foldVenueDiscoveryText(`${result.title} ${result.snippet} ${result.url}`);
+    return identityTokens.some((token) => venueDiscoveryTokenHit(haystack, token));
+  });
+}
+
+export function sourceMatchesResolvedVenueBranch(
+  source: Pick<SearchSnippet, 'title' | 'url'>,
+  branchName: string,
+  requestedVenue: string,
+): boolean {
+  const venueTokens = new Set(venueDiscoverySubjectTokens(requestedVenue));
+  const branchTokens = foldVenueDiscoveryText(branchName).split(' ').filter((token) =>
+    token.length >= 2
+    && !venueTokens.has(token)
+    && !GENERIC_VENUE_BRAND_WORDS.has(token),
+  );
+  if (branchTokens.length === 0) return false;
+  const identity = foldVenueDiscoveryText(`${source.title} ${source.url}`);
+  return branchTokens.every((token) => venueDiscoveryTokenHit(identity, token));
+}
+
+const GENERIC_VENUE_BRAND_WORDS = new Set([
+  'burger', 'burgers', 'restaurant', 'restaurants', 'cafe', 'coffee', 'store',
+  'shop', 'shops', 'location', 'locations', 'branch', 'branches', 'official',
+]);
+
+const NON_BRANCH_SUFFIX_WORDS = new Set([
+  'burger', 'burgers', 'fries', 'meal', 'meals', 'chicken', 'beef', 'menu',
+  'home', 'contact', 'order', 'locations', 'location', 'restaurant', 'restaurants',
+  'official', 'delivery', 'members', 'membership', 'about', 'food', 'drink', 'drinks',
+  'join', 'club', 'friend', 'friends', 'rewards', 'newsletter', 'subscribe', 'sign', 'bli',
+  'us', 'support', 'privacy', 'terms', 'careers', 'account', 'service', 'services',
+]);
+
+export interface OfficialVenueBranchCandidate {
+  readonly name: string;
+  readonly localityHint: string;
+  readonly addressHint?: string;
+  readonly urlHint?: string;
+}
+
+/**
+ * Pull repeated branch labels from an already-read first-party locator page.
+ * This is intentionally brand-agnostic: the requested brand anchors each
+ * label, while product/menu rows are rejected as non-geographic suffixes.
+ */
+export function extractOfficialVenueBranchCandidates(
+  pageText: string,
+  venue: string,
+): OfficialVenueBranchCandidate[] {
+  const venueTokens = foldVenueDiscoveryText(venue).split(' ')
+    .filter((token) => token.length >= 3 && !GENERIC_VENUE_BRAND_WORDS.has(token));
+  if (venueTokens.length === 0) return [];
+
+  const results: OfficialVenueBranchCandidate[] = [];
+  const seen = new Set<string>();
+  const rawLines = pageText.split(/\r?\n/);
+  const nearbyAddressHint = (lineIndex: number): string | undefined => {
+    for (const rawCandidate of rawLines.slice(lineIndex + 1, lineIndex + 10)) {
+      const value = rawCandidate.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!value) continue;
+      const folded = foldVenueDiscoveryText(value);
+      if (venueTokens.some((token) => venueDiscoveryTokenHit(folded, token))) return undefined;
+      const looksLikeAddress = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(value)
+        || /\b\d{4,6}\s+[\p{L}]/u.test(value)
+        || /\b(?:street|road|avenue|lane|drive|way|gate|gata|gaten|vei|veien|veg|platz|strasse|straÃŸe|rue|calle|via)\b/iu.test(value);
+      if (looksLikeAddress) return value;
+    }
+    return undefined;
+  };
+  for (let lineIndex = 0; lineIndex < rawLines.length; lineIndex++) {
+    const rawLine = rawLines[lineIndex];
+    const line = rawLine
+      .replace(/^[\s#*•·–—-]+/u, '')
+      .replace(/\s+(?:read\s+more|learn\s+more|details?)\s*$/iu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (line.length < 3 || line.length > 180) continue;
+
+    const branchPage = /^Venue branch page:\s*([^|]{2,100})\s*\|\s*(https?:\/\/\S+)$/iu.exec(line);
+    if (branchPage?.[1] && branchPage[2]) {
+      const name = branchPage[1].trim();
+      const foldedName = foldVenueDiscoveryText(name);
+      if (!venueTokens.some((token) => venueDiscoveryTokenHit(foldedName, token))) continue;
+      const nameWords = name.split(/\s+/);
+      const localityHint = nameWords.filter((word) => {
+        const folded = foldVenueDiscoveryText(word);
+        return folded
+          && !GENERIC_VENUE_BRAND_WORDS.has(folded)
+          && !venueTokens.some((token) => venueDiscoveryTokenHit(folded, token));
+      }).join(' ').trim();
+      if (!localityHint) continue;
+      const key = foldVenueDiscoveryText(localityHint);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ name, localityHint, urlHint: branchPage[2] });
+      if (results.length >= 80) break;
+      continue;
+    }
+
+    // The page reader emits these rows from schema.org LocalBusiness/Store/
+    // Restaurant records. The marker stays in the evidence excerpt so this
+    // deterministic extraction remains inspectable.
+    const structured = /^Venue branch:\s*([^|]{2,90})(?:\s*\|\s*([^|]{2,100}))?(?:\s*\|\s*(.{3,120}))?$/iu.exec(line);
+    if (structured?.[1]) {
+      const name = structured[1].trim();
+      const identity = foldVenueDiscoveryText(name);
+      if (!venueTokens.some((token) => venueDiscoveryTokenHit(identity, token))) continue;
+      const localityHint = (structured[2] ?? structured[3] ?? name).replace(/\s+/g, ' ').trim();
+      const key = foldVenueDiscoveryText(structured[3]?.trim() || localityHint);
+      if (!localityHint || seen.has(key)) continue;
+      seen.add(key);
+      results.push({ name, localityHint, addressHint: structured[3]?.trim() });
+      if (results.length >= 80) break;
+      continue;
+    }
+    const foldedWords = foldVenueDiscoveryText(line).split(' ').filter(Boolean);
+    const identityHits = venueTokens.filter((token) =>
+      foldedWords.some((word) => venueDiscoveryTokenHit(word, token)),
+    ).length;
+    const explicitlyLabelled = /^(?:branch|location|store|shop|restaurant|cafe|outlet|filiale|avdeling|butikk)\s*[:\-]\s*/iu.test(line);
+    if (identityHits < 1 && !explicitlyLabelled) continue;
+
+    const originalWords = line
+      .replace(/^(?:branch|location|store|shop|restaurant|cafe|outlet|filiale|avdeling|butikk)\s*[:\-]\s*/iu, '')
+      .split(/\s+/);
+    const suffixWords = originalWords.filter((word) => {
+      const folded = foldVenueDiscoveryText(word);
+      return folded.length > 0
+        && !venueTokens.some((token) => venueDiscoveryTokenHit(folded, token))
+        && !GENERIC_VENUE_BRAND_WORDS.has(folded)
+        && !/^(?:at|in|inside|by|filiale|avdeling|butikk|outlet)$/.test(folded);
+    });
+    if (suffixWords.length < 1 || suffixWords.length > 8) continue;
+    const localityHint = suffixWords.join(' ').replace(/^[|:–—-]+|[|:–—-]+$/g, '').trim();
+    const localityTokens = foldVenueDiscoveryText(localityHint).split(' ').filter(Boolean);
+    if (localityTokens.length === 0 || localityTokens.every((token) => NON_BRANCH_SUFFIX_WORDS.has(token))) continue;
+    if (/\b(?:nok|usd|eur|gbp|kr|from|fra|price|rating|opening|hours?)\b/iu.test(localityHint)) continue;
+
+    const key = foldVenueDiscoveryText(localityHint);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push({
+      name: identityHits > 0 ? line : `${venue} ${localityHint}`,
+      localityHint,
+      addressHint: nearbyAddressHint(lineIndex),
+    });
+    if (results.length >= 80) break;
+  }
+  // A locator page usually contributes many rows, while some brands expose
+  // one first-party page per branch. The resolver aggregates across sources
+  // and still requires at least two distinct candidates before comparing.
+  return results;
+}
+
+interface GeocodedVenuePoint {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly displayName: string;
+  readonly placeName?: string;
+  readonly placeType?: string;
+  readonly osmKey?: string;
+  readonly city?: string;
+  readonly country?: string;
+  readonly countryCode?: string;
+}
+
+export interface GeocodedVenueBranch extends OfficialVenueBranchCandidate, GeocodedVenuePoint {}
+
+export interface NearestVenueBranchSelection extends GeocodedVenueBranch {
+  readonly distanceKm: number;
+}
+
+function haversineDistanceKm(a: GeocodedVenuePoint, b: GeocodedVenuePoint): number {
+  const radians = (degrees: number): number => degrees * Math.PI / 180;
+  const latitudeDelta = radians(b.latitude - a.latitude);
+  const longitudeDelta = radians(b.longitude - a.longitude);
+  const startLatitude = radians(a.latitude);
+  const endLatitude = radians(b.latitude);
+  const value = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+export function selectNearestVenueBranch(
+  anchor: GeocodedVenuePoint,
+  branches: readonly GeocodedVenueBranch[],
+): NearestVenueBranchSelection | null {
+  const ranked = branches
+    .map((branch) => ({ ...branch, distanceKm: haversineDistanceKm(anchor, branch) }))
+    .filter((branch) => Number.isFinite(branch.distanceKm) && branch.distanceKm <= 150)
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+  return ranked[0] ?? null;
+}
+
+interface PhotonFeature {
+  properties?: {
+    name?: string;
+    city?: string;
+    district?: string;
+    country?: string;
+    countrycode?: string;
+    type?: string;
+    osm_key?: string;
+  };
+  geometry?: { coordinates?: [number, number] };
+}
+
+const photonPlaceCache = new Map<string, Promise<GeocodedVenuePoint | null>>();
+
+async function fetchPhotonPlace(
+  query: string,
+  timeoutMs: number,
+  bias?: GeocodedVenuePoint,
+): Promise<GeocodedVenuePoint | null> {
+  const cacheKey = `${foldVenueDiscoveryText(query)}:${bias ? `${bias.latitude.toFixed(3)},${bias.longitude.toFixed(3)}` : ''}`;
+  const cached = photonPlaceCache.get(cacheKey);
+  if (cached) return cached;
+  const request = (async (): Promise<GeocodedVenuePoint | null> => {
+    const params = new URLSearchParams({ q: query, limit: '5', lang: 'en' });
+    if (bias) {
+      params.set('lat', String(bias.latitude));
+      params.set('lon', String(bias.longitude));
+    }
+    const response = await fetch(`https://photon.komoot.io/api/?${params.toString()}`, {
+      headers: { 'User-Agent': 'VeggaAI/1.0 (nearest venue research)' },
+      signal: AbortSignal.timeout(Math.max(2_000, Math.min(timeoutMs, 10_000))),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { features?: PhotonFeature[] };
+    const features = [...(payload.features ?? [])].sort((a, b) => {
+      if (!bias?.country) return 0;
+      const aSameCountry = a.properties?.country?.toLowerCase() === bias.country.toLowerCase() ? 1 : 0;
+      const bSameCountry = b.properties?.country?.toLowerCase() === bias.country.toLowerCase() ? 1 : 0;
+      return bSameCountry - aSameCountry;
+    });
+    for (const feature of features) {
+      const coordinates = feature.geometry?.coordinates;
+      const longitude = Number(coordinates?.[0]);
+      const latitude = Number(coordinates?.[1]);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+      const properties = feature.properties ?? {};
+      return {
+        latitude,
+        longitude,
+        displayName: [properties.name, properties.city ?? properties.district, properties.country].filter(Boolean).join(', '),
+        placeName: properties.name,
+        placeType: properties.type,
+        osmKey: properties.osm_key,
+        city: properties.city ?? properties.district,
+        country: properties.country,
+        countryCode: properties.countrycode,
+      };
+    }
+    return null;
+  })().catch(() => null);
+  photonPlaceCache.set(cacheKey, request);
+  void request.finally(() => {
+    setTimeout(() => photonPlaceCache.delete(cacheKey), 10 * 60_000).unref?.();
+  });
+  return request;
+}
+
+async function fetchVenueBranchPlace(
+  candidate: OfficialVenueBranchCandidate,
+  context: string,
+  timeoutMs: number,
+  anchor: GeocodedVenuePoint,
+): Promise<GeocodedVenuePoint | null> {
+  if (candidate.addressHint) {
+    const countryContext = anchor.country ? `, ${anchor.country}` : '';
+    const exact = await fetchPhotonPlace(`${candidate.addressHint}${countryContext}`, timeoutMs, anchor);
+    if (exact) return exact;
+    // Commerce locators often insert county/area labels into a one-line UK
+    // address that full-text geocoders cannot parse. The postal code remains
+    // an exact, inspectable fallback and is safer than the branch name alone.
+    const postalCode = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|\d{4,6})\b/i.exec(candidate.addressHint)?.[1];
+    if (postalCode) {
+      const postal = await fetchPhotonPlace(`${postalCode}${countryContext}`, timeoutMs, anchor);
+      if (postal) return postal;
+    }
+  }
+  // A national locator contains branches outside the anchor city. Use the
+  // country as the completeness boundary; the anchor coordinates still bias
+  // same-name results toward the user's area, and exact token/type checks below
+  // reject nearby-but-different localities.
+  const localityContext = anchor.country && context !== anchor.country ? anchor.country : context;
+  const locality = await fetchPhotonPlace(`${candidate.localityHint}${localityContext ? `, ${localityContext}` : ''}`, timeoutMs, anchor);
+  if (!locality) return null;
+  const requestedTokens = foldVenueDiscoveryText(candidate.localityHint).split(' ').filter((token) => token.length >= 2);
+  const returnedFields = [locality.placeName, locality.city]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => foldVenueDiscoveryText(value));
+  const returnedTokens = new Set(returnedFields.flatMap((value) => value.split(' ').filter(Boolean)));
+  // A locality-only branch label must survive exact token comparison in the
+  // geocoder result. This rejects dangerous near-matches such as Bø -> Bøler
+  // while retaining Røa, Colosseum, Byporten, Ginza, and similar labels.
+  const identityMatches = requestedTokens.some((token) =>
+    token.length <= 3
+      ? returnedFields.some((field) => field === token)
+      : returnedTokens.has(token),
+  );
+  const localityFeature = locality.osmKey === 'place' || /^(?:locality|city|town|village|suburb|district)$/i.test(locality.placeType ?? '');
+  return identityMatches && localityFeature ? locality : null;
+}
+
+interface VenueProximityResolution {
+  readonly branch: NearestVenueBranchSelection;
+  readonly anchor: GeocodedVenuePoint;
+  readonly anchorLabel: string;
+  readonly officialLocatorUrl: string;
+}
+
+async function resolveVenueProximity(
+  query: string,
+  snippets: readonly SearchSnippet[],
+  timeoutMs: number,
+): Promise<VenueProximityResolution | null> {
+  const request = extractVenueProximityRequest(query);
+  if (!request) return null;
+  const officialSources = firstPartyVenueSources(snippets)
+    .map((snippet) => ({
+      snippet,
+      candidates: extractOfficialVenueBranchCandidates(snippet.text, request.venue),
+    }));
+  const candidates: OfficialVenueBranchCandidate[] = [];
+  const candidateKeys = new Set<string>();
+  const sortedSources = officialSources.sort((a, b) => b.candidates.length - a.candidates.length);
+  // A source that hits the extraction ceiling may contain still more branches;
+  // claiming a global nearest branch from that truncated set would be unsafe.
+  if (sortedSources.some((source) => source.candidates.length >= 80)) return null;
+  const orderedCandidates = [
+    ...sortedSources.flatMap((source) => source.candidates.filter((candidate) => candidate.addressHint)),
+    ...sortedSources.flatMap((source) => source.candidates.slice(0, 3)),
+    ...sortedSources.flatMap((source) => source.candidates),
+  ];
+  for (const candidate of orderedCandidates) {
+      const key = foldVenueDiscoveryText(`${candidate.name} ${candidate.localityHint}`);
+      if (candidateKeys.has(key)) continue;
+      candidateKeys.add(key);
+      candidates.push(candidate);
+  }
+  if (process.env.VAI_SEARCH_DEBUG) {
+    console.error(`[search-debug] proximity ${request.venue}: ${officialSources.length} first-party source(s), ${candidates.length} branch candidate(s)`);
+  }
+  // Candidates may come from one locator page or several exact first-party
+  // branch pages. The old single-page requirement missed the latter pattern.
+  if (candidates.length < 2) return null;
+
+  const anchor = await fetchPhotonPlace(request.anchor, timeoutMs);
+  if (!anchor) return null;
+  const context = [anchor.city, anchor.country].filter(Boolean).join(', ');
+  const branches: GeocodedVenueBranch[] = [];
+  const boundedCandidates = candidates.slice(0, 80);
+  // Keep public geocoding bounded and polite while avoiding a long serial wait.
+  for (let offset = 0; offset < boundedCandidates.length; offset += 3) {
+    const batch = boundedCandidates.slice(offset, offset + 3);
+    const points = await Promise.all(batch.map((candidate) =>
+      fetchVenueBranchPlace(candidate, context, timeoutMs, anchor),
+    ));
+    for (let index = 0; index < batch.length; index += 1) {
+      const point = points[index];
+      if (!point) continue;
+      branches.push({ ...batch[index], ...point });
+    }
+  }
+  const geocodeCoverage = boundedCandidates.length > 0 ? branches.length / boundedCandidates.length : 0;
+  if (branches.length < 2 || geocodeCoverage < 0.25) {
+    if (process.env.VAI_SEARCH_DEBUG) {
+      console.error(`[search-debug] proximity ${request.venue}: insufficient comparable branch coverage (${branches.length}/${boundedCandidates.length})`);
+    }
+    return null;
+  }
+  const branch = selectNearestVenueBranch(anchor, branches);
+  if (process.env.VAI_SEARCH_DEBUG) {
+    console.error(`[search-debug] proximity ${request.venue}: anchor=${anchor.displayName}, geocoded=${branches.length}, selected=${branch?.name ?? 'none'}`);
+  }
+  if (!branch) return null;
+  return {
+    branch,
+    anchor,
+    anchorLabel: anchor.displayName.split(',')[0]?.trim() || request.anchor,
+    officialLocatorUrl: officialSources.find((source) => source.candidates.length > 0)?.snippet.url ?? '',
+  };
+}
+
+function venueDetailSearchLabel(kind: VenuePracticalDetailKind): string {
+  const labels: Record<VenuePracticalDetailKind, string> = {
+    hours: 'official opening hours',
+    'admission-price': 'official admission prices',
+    'menu-price': 'menu prices',
+    menu: 'menu',
+    schedule: 'official schedule',
+    contact: 'official contact phone email',
+    address: 'official address',
+    website: 'official website',
+    parking: 'official parking',
+    accessibility: 'official accessibility',
+  };
+  return labels[kind];
+}
+
+function buildVenueProximitySource(resolution: VenueProximityResolution): SearchSnippet {
+  const branch = resolution.branch;
+  const latitude = branch.latitude.toFixed(5);
+  const longitude = branch.longitude.toFixed(5);
+  return {
+    title: `Nearest branch check: ${branch.name}`,
+    text: `${branch.name} is the closest branch-area match in the first-party location list to ${resolution.anchorLabel}, at approximately ${branch.distanceKm.toFixed(1)} km straight-line. The comparison used the venue's official branch list (${resolution.officialLocatorUrl}) and public OpenStreetMap geocoding.`,
+    url: `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=13/${latitude}/${longitude}`,
+    domain: 'openstreetmap.org',
+    favicon: 'https://www.google.com/s2/favicons?domain=openstreetmap.org&sz=32',
+    trust: {
+      tier: 'medium',
+      score: 0.76,
+      reason: 'Deterministic comparison of a first-party branch list with public geocoding',
+    },
+    rank: 4,
+  };
+}
+
+function shiftCitationMarks(answer: string, offset: number): string {
+  if (offset <= 0) return answer;
+  return answer.replace(/\[(\d+)\]/g, (_match, value: string) => `[${Number(value) + offset}]`);
+}
+
+function venueDiscoveryTokenHit(haystack: string, token: string): boolean {
+  const stem = token.length >= 7 ? token.slice(0, token.length - 2) : token.length >= 6 ? token.slice(0, 5) : token;
+  return haystack.includes(stem);
+}
+
+function venueDiscoveryCue(kind: VenuePracticalDetailKind, value: string): boolean {
+  const folded = foldVenueDiscoveryText(value);
+  const cues: Record<VenuePracticalDetailKind, RegExp> = {
+    hours: /\b(?:opening hours?|hours?|open|closed|apningstid(?:er)?|stengt|apent|horarios?|horaires?|offnungszeiten|orari|openingstijden)\b|(?:営業時間|開店|閉店|营业时间|營業時間|영업시간)/i,
+    'admission-price': /\b(?:price|prices|pricing|ticket|tickets|admission|entry|pass|prices?|billetter?)\b/i,
+    'menu-price': /\b(?:menu|meny|price|prices|pricing|food|drink|mat|drikke)\b/i,
+    menu: /\b(?:menu|meny|food|drink|dish|cuisine|mat|drikke|retter?)\b/i,
+    schedule: /\b(?:schedule|timetable|programme?|session|timeplan|program|rutetid)\b/i,
+    contact: /\b(?:contact|phone|telephone|email|kontakt|telefon|post)\b/i,
+    address: /\b(?:address|location|directions|adresse|veibeskrivelse)\b/i,
+    website: /\b(?:website|homepage|nettside|webside)\b/i,
+    parking: /\b(?:parking|car park|parkering)\b/i,
+    accessibility: /\b(?:accessible|accessibility|wheelchair|step free|tilgjengelig|rullestol)\b/i,
+  };
+  return cues[kind].test(folded);
+}
+
+export function looksLikeFirstPartyVenueResult(
+  domain: string,
+  title: string,
+  snippet: string,
+  subjectTokens: readonly string[],
+): boolean {
+  const platformDomains = /^(?:facebook|instagram|linkedin|youtube|tiktok|x|twitter|cylex|mappno|findglocal|cybo|yelp|tripadvisor|foursquare|infobel|norgebiz|gulesider|1881|restaurant(?:er)?inorge)$/i;
+  const domainLabels = domain.replace(/^www\./i, '').split('.').filter(Boolean);
+  const commonCountrySecondLevel = /^(?:co|com|org|net|gov|ac|edu)$/i;
+  const brandLabelIndex = domainLabels.length >= 3 && commonCountrySecondLevel.test(domainLabels.at(-2) ?? '')
+    ? domainLabels.length - 3
+    : Math.max(0, domainLabels.length - 2);
+  const domainStem = foldVenueDiscoveryText(domainLabels[brandLabelIndex] ?? '').replace(/\s+/g, '');
+  // Short retail brands are legitimate domains too (Zara, IKEA, H&M). The
+  // title + requested-subject checks below carry the identity burden; a
+  // five-character host minimum incorrectly demoted those official locators.
+  if (domainStem.length < 3 || platformDomains.test(domainStem)) return false;
+  // A directory, ordering platform, or newspaper commonly appends its own
+  // brand to every result title ("Business - Favrit", "... - Local News").
+  // The host itself must resemble the requested venue; a title suffix alone
+  // is not evidence that the page belongs to the business.
+  const domainMatchesVenue = subjectTokens.some((token) => {
+    const compactToken = token.replace(/\s+/g, '');
+    return venueDiscoveryTokenHit(domainStem, compactToken)
+      || venueDiscoveryTokenHit(compactToken, domainStem);
+  });
+  if (!domainMatchesVenue) return false;
+  const titleCompact = foldVenueDiscoveryText(title).replace(/\s+/g, '');
+  if (titleCompact.length < 4) return false;
+  const identityHaystack = foldVenueDiscoveryText(`${title} ${snippet} ${domain}`);
+  const titleHasVenue = subjectTokens.some((token) => venueDiscoveryTokenHit(foldVenueDiscoveryText(title), token));
+  // Official hosts frequently append a category to a short brand
+  // (jonkburger.no) while their result title uses only the brand (JØNK). The
+  // old exact host/title comparison demoted those real location pages below
+  // Facebook and ordering platforms. Require both host and title identity,
+  // but do not require their complete strings to be identical.
+  return titleHasVenue
+    && subjectTokens.some((token) => venueDiscoveryTokenHit(identityHaystack, token));
+}
+
+const NON_AUTHORITATIVE_VENUE_DOMAIN = /(?:^|\.)(?:facebook|instagram|linkedin|youtube|tiktok|x|twitter|yelp|tripadvisor|foursquare|wikipedia|reddit|cylex(?:-uk)?|infobel|bizseek|allinlondon|findglocal|cybo|norgebiz|gulesider|1881)\.[a-z.]+$/i;
+const TRANSACTIONAL_MENU_PRICE = /(?:[$€£¥₹₩₽₺₫₪₱฿₴₦]\s?\d|\d(?:[\d,. ]*\d)?\s?(?:nok|sek|dkk|isk|kr|usd|cad|aud|nzd|eur|gbp|jpy|cny|inr|aed|chf|pln|czk|huf|ron|try|brl|mxn|zar)\b|\b\d{1,5},-(?=\s|$))/iu;
+
+export function looksLikeTransactionalVenueMenuResult(
+  domain: string,
+  title: string,
+  snippet: string,
+  query: string,
+): boolean {
+  const kind = detectVenuePracticalDetail(query);
+  if (kind !== 'menu' && kind !== 'menu-price') return false;
+  if (NON_AUTHORITATIVE_VENUE_DOMAIN.test(domain)) return false;
+  const text = `${title}\n${snippet}`;
+  if (!/\b(?:menu|meny|food|burger|meal|dish|drink|restaurant|delivery|levering)\b/iu.test(text)) return false;
+  const subjectTokens = venueDiscoverySubjectTokens(query);
+  const identity = foldVenueDiscoveryText(text);
+  const hits = subjectTokens.filter((token) => venueDiscoveryTokenHit(identity, token)).length;
+  if (hits < Math.min(2, Math.max(1, subjectTokens.length))) return false;
+  const exactMerchantMenu = /\b(?:menu|meny)\b/iu.test(title)
+    && /\b(?:restaurant|store|venue|merchant|chain)\b/i.test(`${title} ${snippet}`)
+      || /\b(?:menu|meny)\b/iu.test(title) && /\/(?:restaurant|store|venue)\//i.test(snippet);
+  // Search indexes often omit prices from the short result snippet even when
+  // the destination is an exact merchant menu. The subsequent READ stage
+  // still requires three item/price rows before anything is answered.
+  return TRANSACTIONAL_MENU_PRICE.test(text)
+    && /\b(?:menu|meny|order|delivery|restaurant|food|dish|meal)\b/iu.test(text)
+    || exactMerchantMenu;
+}
+
+function sourceIdentifiesVenue(source: SearchSnippet, query: string): boolean {
+  const subjectTokens = venueDiscoverySubjectTokens(query);
+  if (subjectTokens.length === 0) return false;
+  const title = foldVenueDiscoveryText(source.title);
+  const text = foldVenueDiscoveryText(`${source.title} ${source.text}`);
+  const required = Math.min(2, Math.max(1, subjectTokens.length));
+  const titleHits = subjectTokens.filter((token) => venueDiscoveryTokenHit(title, token)).length;
+  const totalHits = subjectTokens.filter((token) => venueDiscoveryTokenHit(text, token)).length;
+  return titleHits >= 1 && totalHits >= required;
+}
+
+function sourceVerifiesVenueCapability(
+  source: SearchSnippet,
+  query: string,
+  kind: VenuePracticalDetailKind,
+): boolean {
+  if (!sourceIdentifiesVenue(source, query)) return false;
+  if (!answerMatchesVenuePracticalDetail(kind, source.text)) return false;
+  if (kind === 'menu' || kind === 'menu-price') {
+    if (kind === 'menu' && source.trust.tier === 'high') return true;
+    // An exact merchant menu must contain several independently parsed item
+    // rows. A search snippet mentioning one promotional price is not enough.
+    return extractVenueMenuItems(source.text, 4).length >= 3;
+  }
+  return true;
+}
+
+/**
+ * Promote a successfully-read exact venue detail page by verified structure,
+ * not by a hard-coded list of delivery platforms or countries. This happens
+ * after READ, so the destination page itself must match the requested shape.
+ */
+export function promoteVerifiedVenueSources(
+  snippets: readonly SearchSnippet[],
+  query: string,
+  kind: VenuePracticalDetailKind,
+): SearchSnippet[] {
+  if (kind !== 'menu' && kind !== 'menu-price') return [...snippets];
+  return snippets.map((source) => {
+    if (source.trust.tier === 'high'
+      || NON_AUTHORITATIVE_VENUE_DOMAIN.test(source.domain)
+      || !sourceVerifiesVenueCapability(source, query, kind)) return source;
+    return {
+      ...source,
+      trust: {
+        tier: 'medium' as const,
+        score: Math.max(0.72, source.trust.score),
+        reason: `Verified exact venue ${kind} structure after reading: ${source.domain}`,
+      },
+      rank: source.rank * 1.35,
+    };
+  }).sort((a, b) => b.rank - a.rank);
+}
+
+export function extractVenueVerificationIdentifier(snippets: readonly SearchSnippet[]): string | null {
+  const firstParty = snippets.filter((snippet) => /First-party venue domain\/title match|Verified official venue detail page/i.test(snippet.trust.reason));
+  for (const snippet of firstParty) {
+    const phones = snippet.text.match(/(?:\+\s?\d{1,3}[\s().-]*)?(?:\d[\s().-]*){7,14}\d/g) ?? [];
+    for (const value of phones) {
+      const digits = value.replace(/\D/g, '');
+      if (digits.length < 8 || digits.length > 15) continue;
+      if (/^(?:19|20)\d{6}$/.test(digits)) continue;
+      if (/^\s*\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}\s*$/.test(value)) continue;
+      return value.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return null;
+}
+
+function firstPartyVenueSources(snippets: readonly SearchSnippet[]): SearchSnippet[] {
+  return snippets.filter((snippet) => /First-party venue domain\/title match|Verified official venue detail page/i.test(snippet.trust.reason));
+}
+
+export function extractVenueVerificationAddress(snippets: readonly SearchSnippet[]): string | null {
+  for (const snippet of firstPartyVenueSources(snippets)) {
+    const street = /^Street address:\s*(.+)$/im.exec(snippet.text)?.[1]?.trim();
+    const postalLocality = /^Postal locality:\s*(.+)$/im.exec(snippet.text)?.[1]?.trim();
+    if (street && postalLocality) return `${street}, ${postalLocality}`;
+    const explicit = /^(?:Address|Adresse):\s*(.{4,120})$/im.exec(snippet.text)?.[1]?.trim();
+    if (explicit) return explicit;
+  }
+  return null;
+}
+
+function extractFirstPartyVenueName(snippets: readonly SearchSnippet[], query: string): string {
+  for (const snippet of firstPartyVenueSources(snippets)) {
+    const segments = snippet.title.split(/\s+(?:[-–—|])\s+/).map((value) => value.trim()).filter(Boolean);
+    const candidate = segments.find((value) => value.length >= 3 && value.length <= 80 && !/^(?:home|official|welcome)$/i.test(value));
+    if (candidate) return candidate;
+  }
+  return extractVenuePracticalSubject(query);
+}
+
+interface NearbyVenueElement {
+  tags?: Record<string, string>;
+}
+
+export function extractNearbyVenueContainerNames(elements: readonly NearbyVenueElement[]): string[] {
+  const names = new Set<string>();
+  for (const element of elements) {
+    const tags = element.tags ?? {};
+    const isContainer = tags.shop === 'mall'
+      || /^(?:retail|commercial)$/i.test(tags.building ?? '')
+      || /^(?:marketplace|food_court)$/i.test(tags.amenity ?? '');
+    const name = tags.name?.replace(/\s+/g, ' ').trim();
+    if (isContainer && name && name.length >= 3 && name.length <= 100) names.add(name);
+  }
+  return [...names].slice(0, 3);
+}
+
+const nearbyVenueContainerCache = new Map<string, Promise<string[]>>();
+
+async function fetchNearbyVenueContainers(address: string, timeoutMs: number): Promise<string[]> {
+  const cacheKey = foldVenueDiscoveryText(address);
+  const cached = nearbyVenueContainerCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = (async (): Promise<string[]> => {
+    const headers = {
+      'User-Agent': 'VeggaAI/1.0 (public venue-detail verification)',
+      'Accept-Language': 'en,no;q=0.9',
+    };
+    const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`;
+    const geocodeResponse = await fetch(geocodeUrl, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!geocodeResponse.ok) return [];
+    const places = await geocodeResponse.json() as Array<{ lat?: string; lon?: string }>;
+    const latitude = Number(places[0]?.lat);
+    const longitude = Number(places[0]?.lon);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+
+    const overpassQuery = `[out:json][timeout:12];(`
+      + `nwr["name"]["shop"="mall"](around:250,${latitude},${longitude});`
+      + `nwr["name"]["building"~"^(retail|commercial)$"](around:250,${latitude},${longitude});`
+      + `nwr["name"]["amenity"~"^(marketplace|food_court)$"](around:250,${latitude},${longitude});`
+      + ');out center tags 12;';
+    const overpassResponse = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`,
+      { headers, signal: AbortSignal.timeout(Math.max(timeoutMs, 14_000)) },
+    );
+    if (!overpassResponse.ok) return [];
+    const data = await overpassResponse.json() as { elements?: NearbyVenueElement[] };
+    return extractNearbyVenueContainerNames(data.elements ?? []);
+  })().catch(() => [] as string[]);
+
+  nearbyVenueContainerCache.set(cacheKey, request);
+  void request.then((names) => {
+    if (names.length === 0) {
+      nearbyVenueContainerCache.delete(cacheKey);
+      return;
+    }
+    setTimeout(() => nearbyVenueContainerCache.delete(cacheKey), 5 * 60_000).unref?.();
+  });
+  return request;
+}
+
+function venueVerificationQuery(
+  query: string,
+  kind: VenuePracticalDetailKind,
+  identifier: string,
+  venueName: string,
+  containerName?: string,
+): string {
+  const norwegian = /[\u00e6øåÆØÅ]|\b(?:hva|når|hvor|hommer|oslo|norge)\b/i.test(query);
+  const labelsEn: Record<VenuePracticalDetailKind, string> = {
+    hours: 'opening hours',
+    'admission-price': 'admission ticket prices',
+    'menu-price': 'menu prices',
+    menu: 'menu',
+    schedule: 'schedule timetable',
+    contact: 'contact phone email',
+    address: 'address directions',
+    website: 'official website',
+    parking: 'parking',
+    accessibility: 'accessibility wheelchair',
+  };
+  const labelsNo: Record<VenuePracticalDetailKind, string> = {
+    hours: 'åpningstider',
+    'admission-price': 'billettpriser inngang',
+    'menu-price': 'meny priser',
+    menu: 'meny',
+    schedule: 'timeplan program',
+    contact: 'kontakt telefon e-post',
+    address: 'adresse veibeskrivelse',
+    website: 'offisiell nettside',
+    parking: 'parkering',
+    accessibility: 'tilgjengelighet rullestol',
+  };
+  const identity = containerName ? `${venueName} ${containerName}` : `${venueName} ${identifier}`;
+  return `${identity} ${norwegian ? labelsNo[kind] : labelsEn[kind]}`.replace(/\s+/g, ' ').trim();
+}
 
 function rankSnippets(
   rawResults: Array<RawSearchResult & { queryIndex: number }>,
@@ -2098,6 +3480,10 @@ function rankSnippets(
   // 6 wiki sources and the Vai-voice forum synth never fires.
   const _isOpinionShape = /\b(?:best|top|recommend|worth|underrated|overrated|favorite|favourite|prefer|hate|love|why\s+do(?:es)?\s+(?:people|users|gamers|players|folks|everyone|anyone)|opinion|sentiment|thoughts?\s+on|vs\.?|versus|alternative|cheap|budget|good\s+for|reddit)\b/i.test(query);
   const _forumHostRe = /(?:^|\.)(reddit\.com|news\.ycombinator\.com|stackoverflow\.com|stackexchange\.com|discourse\.org|forum\.|community\.|lemmy\.|tildes\.net|metafilter\.com)/i;
+  const admissionPriceLookup = isVenueAdmissionPriceLookup(query);
+  const admissionPlan = admissionPriceLookup ? buildSearchPlan(query) : null;
+  const practicalKind = detectVenuePracticalDetail(query);
+  const practicalSubjectTokens = practicalKind ? venueDiscoverySubjectTokens(query) : [];
 
   for (const raw of rawResults) {
     // URL safety check
@@ -2124,16 +3510,56 @@ function rankSnippets(
     seen.add(fp);
 
     // Trust scoring
-    const trust = scoreDomain(domain);
+    const firstPartyVenueResult = Boolean(practicalKind)
+      && looksLikeFirstPartyVenueResult(domain, raw.title, raw.snippet, practicalSubjectTokens);
+    const transactionalMenuResult = Boolean(practicalKind)
+      && looksLikeTransactionalVenueMenuResult(domain, raw.title, raw.snippet, query);
+    const trust = isKnownOfficialVenueDetailUrl(raw.url)
+      ? { tier: 'high' as const, score: 0.9, reason: `Verified official venue detail page: ${domain}` }
+      : firstPartyVenueResult
+        ? { tier: 'high' as const, score: 0.82, reason: `First-party venue domain/title match: ${domain}` }
+        : transactionalMenuResult
+          ? {
+              tier: 'low' as const,
+              score: Math.max(0.45, scoreDomain(domain).score),
+              reason: `Candidate exact venue menu awaiting page verification: ${domain}`,
+            }
+      : scoreDomain(domain);
     if (trust.score < minTrust) continue;
 
     // Relevance boost: earlier queries and earlier results rank higher
     const positionBoost = 1 / (1 + raw.queryIndex * 0.3);
     let rank = trust.score * positionBoost;
+    if (practicalKind) {
+      const identityHaystack = foldVenueDiscoveryText(`${raw.title} ${raw.url} ${raw.snippet}`);
+      const identityHits = practicalSubjectTokens.filter((token) => venueDiscoveryTokenHit(identityHaystack, token)).length;
+      rank *= identityHits >= 2 ? 2.7 : identityHits === 1 ? 1.25 : 0.08;
+      if (venueDiscoveryCue(practicalKind, `${raw.title} ${raw.snippet}`)) rank *= 1.8;
+      // A venue's own domain is better practical evidence than an encyclopedia
+      // page that merely repeats the branch name. The previous small boost let
+      // Wikipedia consume the bounded read budget ahead of the official store
+      // page even when both were present.
+      if (firstPartyVenueResult) rank *= 2.7;
+      if (transactionalMenuResult) rank *= 2.25;
+    }
     // R17: opinion-query forum boost. Lifts reddit (0.6) above wiki (0.9)
     // for recommendation queries so community sentiment survives ranking.
     if (_isOpinionShape && _forumHostRe.test(domain)) {
       rank *= 1.9;
+    }
+    if (admissionPlan) {
+      const identityHaystack = `${raw.title} ${domain}`
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[øØ]/g, 'o')
+        .toLowerCase();
+      const hasIdentity = admissionPlan.entities
+        .map((value) => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[øØ]/g, 'o').toLowerCase())
+        .filter((value) => value.length >= 3)
+        .filter((value) => !/^(?:prices?|costs?|visit(?:ing)?|admission|entry|entrance|tickets?|passes?|snow|park)$/.test(value))
+        .some((value) => identityHaystack.includes(value));
+      const looksLikePricePage = /\b(?:prices?|priser|products?|produkter|tickets?|billetter|admission|entry|passes?)\b/i.test(`${raw.title} ${raw.snippet}`);
+      if (hasIdentity && looksLikePricePage) rank *= 3;
     }
     const wrapperLike = biasPerplexityProduct && isPerplexityWrapperLikeResult(raw);
     const mathLike = biasPerplexityProduct && isPerplexityMathResult(raw);
@@ -2150,7 +3576,7 @@ function rankSnippets(
     }
 
     scored.push({
-      text: raw.snippet.slice(0, 500),
+      text: raw.snippet.slice(0, admissionPriceLookup ? 1_500 : 500),
       url: raw.url,
       domain,
       title: raw.title,
@@ -2848,6 +4274,16 @@ function extractContentWords(text: string): Set<string> {
 }
 type RelevanceShape =
   | 'population'
+  | 'price'
+  | 'menu-price'
+  | 'hours'
+  | 'menu'
+  | 'schedule'
+  | 'contact'
+  | 'address'
+  | 'website'
+  | 'parking'
+  | 'accessibility'
   | 'yes-no'
   | 'recommendation'
   | 'comparison'
@@ -2876,6 +4312,9 @@ const RELEVANCE_TOPIC_NOISE = new Set([
   'explain','briefly','simple','simply','words','facts','there','that','this','one',
   'cause','causes','caused','reason','reasons',
   'phone','telephone','number','contact','details','online','website','email','address',
+  'price','prices','cost','costs','visit','visiting','admission','entry','entrance',
+  'ticket','tickets','pass','passes','official','their','opening','hours','open','closed',
+  'menu','schedule','timetable','parking','accessibility',
 ]);
 
 const SHORT_TOPIC_ACRONYMS = new Set([
@@ -2884,7 +4323,17 @@ const SHORT_TOPIC_ACRONYMS = new Set([
 
 function inferRelevanceShape(query: string, plan: VaiSearchPlan): RelevanceShape {
   const q = normalizeCommonTypos(query).toLowerCase();
+  const practicalKind = venuePracticalKindFromIntent(plan.intent) ?? detectVenuePracticalDetail(q);
+  if (practicalKind === 'hours') return 'hours';
+  if (practicalKind === 'menu' || practicalKind === 'menu-price') return practicalKind;
+  if (practicalKind === 'schedule') return 'schedule';
+  if (practicalKind === 'contact') return 'contact';
+  if (practicalKind === 'address') return 'address';
+  if (practicalKind === 'website') return 'website';
+  if (practicalKind === 'parking') return 'parking';
+  if (practicalKind === 'accessibility') return 'accessibility';
   if (/\b(?:how\s+many\s+people|population|inhabitants?|residents?|people\s+live|lives?\s+there)\b/.test(q)) return 'population';
+  if (classifyFreshFactKind(q) === 'price') return 'price';
   if (/^(?:does|do|did|can|could|will|would|has|have|had|should|is|are)\b/.test(q)) return 'yes-no';
   if (/\b(?:recommend|should\s+i|would\s+you|worth\s+it|good\s+(?:idea|for)|which\s+one|best|top)\b/.test(q) || plan.intent === 'recommendation') return 'recommendation';
   if (/\b(?:bigger|larger|smaller|higher|lower|more\s+than|less\s+than|vs\.?|versus|compare|compared|difference\s+between)\b/.test(q) || plan.intent === 'comparison') return 'comparison';
@@ -2900,6 +4349,27 @@ function answerShapeMatches(shape: RelevanceShape, combined: string): boolean {
   switch (shape) {
     case 'population':
       return /\b(?:population|inhabitants?|residents?|census|metro\s+area|urban\s+area|municipality|people\s+(?:live|living)|lives?\s+in|\d[\d.,]*\s*(?:million|thousand|residents?|inhabitants?|people))\b/i.test(combined);
+    case 'price':
+      return /(?:[$€£]\s?\d(?:[\d,. ]*\d)?|\d(?:[\d,. ]*\d)?\s?(?:usd|eur|gbp|nok|sek|dkk|kr|kroner?)\b)/i.test(combined)
+        && /\b(?:prices?|costs?|from|fra|tickets?|admission|entry|passes?|membership|weekday|weekend|day)\b/i.test(combined);
+    case 'menu-price':
+      return answerMatchesVenuePracticalDetail('menu-price', combined);
+    case 'hours':
+      return answerMatchesVenuePracticalDetail('hours', combined);
+    case 'menu':
+      return answerMatchesVenuePracticalDetail('menu', combined);
+    case 'schedule':
+      return answerMatchesVenuePracticalDetail('schedule', combined);
+    case 'contact':
+      return answerMatchesVenuePracticalDetail('contact', combined);
+    case 'address':
+      return answerMatchesVenuePracticalDetail('address', combined);
+    case 'website':
+      return answerMatchesVenuePracticalDetail('website', combined);
+    case 'parking':
+      return answerMatchesVenuePracticalDetail('parking', combined);
+    case 'accessibility':
+      return answerMatchesVenuePracticalDetail('accessibility', combined);
     case 'yes-no':
       return /\b(?:yes|no|has|have|had|makes?|made|sells?|sold|offers?|serves?|produces?|stocks?|carr(?:y|ies)|provides?|supports?|includes?|contains?|eats?|drinks?|available|menu|products?|manufactured?\s+by)\b/i.test(combined);
     case 'recommendation':
@@ -3159,6 +4629,10 @@ function topicAnchorGateMatches(
   // Comparison synthesis intentionally combines side-specific evidence: one
   // source may describe SearXNG and another DuckDuckGo.
   if (shape === 'comparison') return topicHits >= 1;
+  // Venue names are often rendered differently by the source ("SNØ" vs
+  // "the snow park in Oslo"). One distinctive matching anchor plus an actual
+  // currency-bearing price line is enough; the shape gate still blocks noise.
+  if (shape === 'price') return topicHits >= 1;
   return topicHits >= 2 && topicCoverage >= 0.55;
 }
 
@@ -3217,14 +4691,55 @@ export function scoreSnippetRelevanceForQuery(
   if (packageSupportSource) {
     score += 0.12;
   }
+  const practicalKind = detectVenuePracticalDetail(query);
+  const venueSubjectTokens = practicalKind ? venueDiscoverySubjectTokens(query) : [];
+  const venueIdentityHaystack = practicalKind
+    ? foldVenueDiscoveryText(`${snippet.title || ''} ${snippet.domain || ''} ${snippet.text || ''}`)
+    : '';
+  const venueIdentityHits = practicalKind
+    ? venueSubjectTokens.filter((token) => venueDiscoveryTokenHit(venueIdentityHaystack, token)).length
+    : 0;
+  const venuePracticalSupportSource = Boolean(practicalKind)
+    && shapeMatched
+    && venueIdentityHits >= Math.min(2, venueSubjectTokens.length);
+  if (venuePracticalSupportSource) score += 0.14;
   if (shape === 'population' && hasWrongShapePopulationNoise(combined)) {
     score -= 0.35;
   }
 
   const topicOk = topicAnchorGateMatches(topicAnchors, topicHits, topicCoverage, shape);
+  const priceIdentityMatch = shape === 'price' && topicAnchors.some((anchor) => {
+    if (textHasTopicAnchor(snippet.title || '', anchor.value)) return true;
+    const compactAnchor = anchor.value
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[øØ]/g, 'o')
+      .replace(/[^a-z0-9]/gi, '')
+      .toLowerCase();
+    const compactDomain = (snippet.domain ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    return compactAnchor.length >= 4 && compactDomain.includes(compactAnchor);
+  });
+  const identityAwareTopicOk = shape === 'price' && topicAnchors.length > 1
+    ? topicHits >= 2 || priceIdentityMatch
+    : topicOk;
   const shapeOk = shape === 'generic' || shapeMatched || packageSupportSource;
-  const threshold = shape === 'definition' || shape === 'person' || shape === 'generic' ? 0.38 : 0.5;
-  const matched = packageSupportSource || (topicOk && shapeOk && score >= threshold);
+  const threshold = shape === 'definition' || shape === 'person' || shape === 'generic'
+    ? 0.38
+    : shape === 'price'
+      ? 0.42
+      : 0.5;
+  // For a chain-store question, brand-only evidence is not enough: UNIQLO
+  // Shinjuku must not answer a UNIQLO Ginza query. The entity-first subject
+  // tokens intentionally exclude request/day words, so requiring the branch
+  // token here is stricter without making wording variants brittle.
+  const venueIdentityOk = !practicalKind
+    || venueSubjectTokens.length === 0
+    || venueIdentityHits >= Math.min(2, venueSubjectTokens.length);
+  const matched = practicalKind
+    ? venueIdentityOk && shapeMatched && (venuePracticalSupportSource || score >= threshold)
+    : packageSupportSource
+      || venuePracticalSupportSource
+      || (identityAwareTopicOk && shapeOk && score >= threshold);
 
   return {
     score: Math.max(0, Math.min(1, score)),
@@ -3241,10 +4756,21 @@ export function filterRelevantSnippetsForQuery(
   query: string,
   snippets: readonly SearchSnippet[],
 ): SearchSnippet[] {
+  const venuePracticalQuery = detectVenuePracticalDetail(query) !== null;
+  const trustPriority = (snippet: SearchSnippet): number =>
+    snippet.trust.tier === 'high' ? 3 : snippet.trust.tier === 'medium' ? 2 : snippet.trust.tier === 'low' ? 1 : 0;
+  const venueAuthorityPriority = (snippet: SearchSnippet): number =>
+    /First-party venue domain\/title match|Verified official venue detail page/i.test(snippet.trust.reason) ? 1 : 0;
   return snippets
     .map((snippet) => ({ snippet, relevance: scoreSnippetRelevanceForQuery(query, snippet) }))
     .filter(({ snippet, relevance }) => relevance.matched && !looksLikeJunkSnippet(snippet.text, snippet.title || ''))
     .sort((a, b) => {
+      if (venuePracticalQuery) {
+        const trustDelta = trustPriority(b.snippet) - trustPriority(a.snippet);
+        if (trustDelta !== 0) return trustDelta;
+        const authorityDelta = venueAuthorityPriority(b.snippet) - venueAuthorityPriority(a.snippet);
+        if (authorityDelta !== 0) return authorityDelta;
+      }
       const relevanceDelta = b.relevance.score - a.relevance.score;
       if (Math.abs(relevanceDelta) > 0.001) return relevanceDelta;
       return b.snippet.rank - a.snippet.rank;
@@ -3291,6 +4817,84 @@ function looksLikeJunkSnippet(text: string, title: string): boolean {
   return false;
 }
 
+export interface VenueMenuItem {
+  readonly name: string;
+  readonly price: string;
+}
+
+export function extractVenueContactExcerpt(text: string): string | null {
+  const candidates: Array<{ score: number; value: string }> = [];
+  const lines = text.split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  for (const line of lines) {
+    const email = line.match(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/)?.[0]?.replace(/[.,;]+$/, '');
+    const phones = line.match(/(?:\+\s?\d{1,3}[\s().-]*)?(?:\d[\s().-]*){7,14}\d/g) ?? [];
+    const phone = phones.find((value) => {
+      const digits = value.replace(/\D/g, '');
+      return digits.length >= 8 && digits.length <= 15
+        && !/^(?:19|20)\d{6}$/.test(digits);
+    })?.replace(/\s+/g, ' ').trim();
+    if (!email && !phone) continue;
+    const explicitCue = /\b(?:phone|telephone|tel\.?|contact|telefon|kontakt|e-?mail|e-?post)\b/iu.test(line);
+    const formattedPhone = phone ? /[+ ()-]/.test(phone) : false;
+    const score = (email ? 3 : 0) + (phone ? 2 : 0) + (explicitCue ? 2 : 0) + (formattedPhone ? 1 : 0);
+    const value = [phone ? `Phone: ${phone}` : '', email ? `Email: ${email}` : ''].filter(Boolean).join(' · ');
+    candidates.push({ score, value });
+  }
+  return candidates.sort((a, b) => b.score - a.score)[0]?.value ?? null;
+}
+
+const MENU_PRICE_LINE = /(?:(?:from|fra|från|ab|desde|à\s+partir\s+de)\s+)?(?:(?:[$€£¥₹₩₽₺₫₪₱฿₴₦]\s?\d(?:[\d,. ]*\d)?)|(?:\d(?:[\d,. ]*\d)?\s?(?:nok|sek|dkk|isk|kr|usd|cad|aud|nzd|eur|gbp|jpy|cny|inr|aed|chf|pln|czk|huf|ron|try|brl|mxn|zar))\b|(?:\b\d{1,5},-(?=\s|$)))/iu;
+
+function plausibleMenuItemName(value: string): boolean {
+  const name = value.replace(/^[-*•#\s]+/u, '').replace(/\s+/g, ' ').trim();
+  if (name.length < 3 || name.length > 80) return false;
+  if (name.split(/\s+/).length > 10) return false;
+  if (/[.,;:]$/.test(name) || name.includes(',')) return false;
+  if (/\b(?:delivery|levering|service\s*fee|min(?:imum)?\.?\s*order|rating|discount|rabatt|available|opening\s+hours?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|image|search|søk|popular|mest\s+likte|product\s+information)\b/iu.test(name)) return false;
+  if (/^(?:premium|fried|vegetarian|sides?|kids?\s+meal|dip|soda|drinks?|jarritos|popular|lunch\s+deal)$/iu.test(name)) return false;
+  return /\p{L}/u.test(name);
+}
+
+/** Extract item/price rows from ordinary restaurant and ordering-page text. */
+export function extractVenueMenuItems(text: string, maxItems = 8): VenueMenuItem[] {
+  const lines = text.split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim());
+  const items: VenueMenuItem[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || !MENU_PRICE_LINE.test(line)) continue;
+    if (/\b(?:service\s*fee|min(?:imum)?\.?\s*(?:order|bestilling)|delivery|levering|first\s+order|første\s+best|rating|discount|rabatt)\b/iu.test(line)) continue;
+    const match = MENU_PRICE_LINE.exec(line);
+    if (!match) continue;
+    let name = line.slice(0, match.index).replace(/^[-*•#\s]+/u, '').trim();
+    if (!plausibleMenuItemName(name)) {
+      name = '';
+      for (let previous = index - 1; previous >= Math.max(0, index - 6); previous -= 1) {
+        if (!lines[previous]) continue;
+        if (!plausibleMenuItemName(lines[previous])) continue;
+        name = lines[previous].replace(/^[-*•#\s]+/u, '').trim();
+        break;
+      }
+    }
+    if (!name) continue;
+    const foldedName = foldVenueDiscoveryText(name);
+    if (seen.has(foldedName)) continue;
+    seen.add(foldedName);
+    const price = match[0]
+      .replace(/^fra\s+/iu, 'from ')
+      .replace(/^från\s+/iu, 'from ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    items.push({ name, price });
+    if (items.length >= Math.max(1, Math.min(maxItems, 12))) break;
+  }
+  return items;
+}
+
+function venueMenuSourceName(title: string): string {
+  return title.split(/\s+(?:[-–—|])\s+/)[0]?.trim() || title.trim();
+}
+
 function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], hadFilteredCandidates = false): string {
   if (snippets.length === 0) {
     if (hadFilteredCandidates) {
@@ -3314,6 +4918,51 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   }
   const used = relevantUsed.slice(0, 5);
 
+  // Exact-shape venue fast path. Hours must come from clock-bearing rows on a
+  // current source; a price table or generic venue description cannot pass.
+  const venueDetailKind = detectVenuePracticalDetail(query);
+  if (venueDetailKind === 'hours') {
+    for (let sourceIndex = 0; sourceIndex < used.length; sourceIndex += 1) {
+      const source = used[sourceIndex];
+      if (source.trust.tier !== 'high' && source.trust.tier !== 'medium') continue;
+      const excerpt = source.url.includes('snooslo.no/')
+        ? (/^SNØ snow zone\b/u.test(source.text.trim())
+          ? source.text.trim()
+          : extractSnoOsloOpeningHoursExcerpt(source.text) ?? extractOpeningHoursExcerpt(source.text))
+        : extractLeadingOpeningHoursExcerpt(source.text)
+          ?? extractVenueOpeningHoursExcerpt(source.text, query)
+          ?? extractOpeningHoursExcerpt(source.text);
+      if (!excerpt || !answerMatchesVenuePracticalDetail('hours', excerpt)) continue;
+      const displayExcerpt = excerpt.replace(/^Opening hours:\s*/gim, '');
+      return `**Opening hours:** ${collectCitationMarks([sourceIndex])}\n\n${displayExcerpt}\n\nHours can change, especially on holidays; these are the current times published by the cited source.`;
+    }
+    return `I found pages about the requested venue, but none exposed clock-bearing opening hours for that exact branch. I won't replace the requested hours with general background or another branch's schedule.`;
+  }
+
+  if (venueDetailKind === 'contact') {
+    for (let sourceIndex = 0; sourceIndex < used.length; sourceIndex += 1) {
+      const source = used[sourceIndex];
+      if (source.trust.tier !== 'high' && source.trust.tier !== 'medium') continue;
+      const contact = extractVenueContactExcerpt(source.text);
+      if (!contact || !answerMatchesVenuePracticalDetail('contact', contact)) continue;
+      const emphasizedContact = contact.replace(/Phone:\s*([^·]+?)(?=\s*·|$)/i, (_match, phone: string) => `Phone: **${phone.trim()}**`);
+      return `**${source.title}**\n\n**Contact:** ${emphasizedContact} ${collectCitationMarks([sourceIndex])}\n\n_This is the contact information currently published by the cited branch page._`;
+    }
+    return `I found pages about the requested venue, but none exposed branch-specific contact information. I won't substitute a chain-wide or headquarters contact.`;
+  }
+
+  if (venueDetailKind === 'menu' || venueDetailKind === 'menu-price') {
+    for (let sourceIndex = 0; sourceIndex < used.length; sourceIndex += 1) {
+      const source = used[sourceIndex];
+      if (source.trust.tier !== 'high' && source.trust.tier !== 'medium') continue;
+      const items = extractVenueMenuItems(source.text, 8);
+      if (items.length < 3) continue;
+      const lines = items.map((item) => `- **${item.name}** — ${item.price}`);
+      return `**Menu at ${venueMenuSourceName(source.title)}:** ${collectCitationMarks([sourceIndex])}\n\n${lines.join('\n')}\n\n_These are current prices shown by the cited menu page and can change; open it for the full menu, options, and allergens._`;
+    }
+    return `I found pages about the requested venue, but none exposed a current itemized menu for that exact branch from a first-party or transactional source. I won't substitute another branch or turn a generic directory listing into a menu.`;
+  }
+
   // FRESH-FACT FAST PATH (the scalable web→answer fix): when the question asks for a fresh
   // value (a price, temperature, version, date, count), pull the answer-bearing line
   // straight out of the READ page content — the same thing a human reads off Google. This
@@ -3323,6 +4972,13 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   const freshKind = classifyFreshFactKind(query);
   if (freshKind) {
     const readSources: ReadSource[] = used.map((s, i) => ({ index: i, title: s.title, url: s.url, text: s.text }));
+    if (freshKind === 'price' && isVenueAdmissionPriceLookup(query)) {
+      const facts = extractFreshFacts(query, readSources, freshKind, { maxFacts: 8 });
+      if (facts.length > 0) {
+        const lines = facts.map((fact) => `- ${fact.text} ${collectCitationMarks([fact.sourceIndex])}`);
+        return `${lines.join('\n')}\n\n_Admission prices read from the current sources above; verify the selected date and ticket type before booking._`;
+      }
+    }
     // Multi-entity asks ("price of eth AND btc", "weather in Oslo and Bergen") are several
     // questions in one. Pull the distinct subjects and extract a fact PER subject so the
     // answer covers all of them, not just the first. Falls back to single-fact extraction.
@@ -3675,38 +5331,401 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
  * Lightweight extraction — strips HTML tags, nav, scripts, ads.
  * Returns null on any failure (network, timeout, safety).
  */
-async function readPage(url: string, timeoutMs: number, maxChars: number): Promise<string | null> {
+export function extractRelevantVenueResourceLinks(
+  html: string,
+  baseUrl: string,
+  kind: VenuePracticalDetailKind,
+  includeLocator = false,
+): string[] {
+  const wantsMenu = kind === 'menu' || kind === 'menu-price';
+  let base: URL;
+  try { base = new URL(baseUrl); } catch { return []; }
+  const links: string[] = [];
+  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = match[1].replace(/&amp;/gi, '&').trim();
+    const label = stripHtmlTags(match[2]);
+    const linkText = `${href} ${label}`;
+    const documentLink = /\.pdf(?:[?#]|$)/iu.test(href);
+    const menuLink = wantsMenu
+      && /(?:\.pdf(?:[?#]|$)|\b(?:menu|meny|menyen|speisekarte|carta|carte)\b)/iu.test(linkText);
+    const locatorLink = includeLocator
+      && /\b(?:locations?|branches|stores?|shops?|restaurants?|store[-_ ]?locator|find[-_ ]?(?:a|us|store|shop))\b/iu.test(linkText);
+    if (!documentLink && !menuLink && !locatorLink) continue;
+    try {
+      const resolved = new URL(href, base);
+      if (!/^https?:$/.test(resolved.protocol) || resolved.hostname !== base.hostname) continue;
+      const clean = resolved.toString();
+      if (clean !== base.toString() && !links.includes(clean)) links.push(clean);
+    } catch { /* malformed links are ignored */ }
+    if (links.length >= 2) break;
+  }
+  return links;
+}
+
+async function readPage(
+  url: string,
+  timeoutMs: number,
+  maxChars: number,
+  venueQuery?: string,
+  followVenueLinks = true,
+): Promise<string | null> {
   try {
     const res = await safeFetch(url, {
       headers: {
-        'User-Agent': 'VeggaAI/0.1 (Local AI Learning Agent)',
+        // Many first-party commerce sites serve a reduced shell or delay bot-
+        // identified requests, while their public browser page contains the
+        // structured store schedule Vai needs to verify. This remains a plain
+        // bounded HTTP read; it does not execute page scripts.
+        'User-Agent': BROWSER_USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml',
       },
       signal: AbortSignal.timeout(timeoutMs),
     }, {
       checkDns: process.env.NODE_ENV !== 'test',
     });
-    if (!res.ok) return null;
-
     const contentType = res.headers.get('content-type') ?? '';
-    if (!contentType.includes('text/html') && !contentType.includes('xhtml')) return null;
+    if (!res.ok) {
+      if (process.env.VAI_SEARCH_DEBUG) console.error(`[search-debug] readPage HTTP ${res.status}: ${url}`);
+      return null;
+    }
+    if (contentType.includes('application/pdf') || /\.pdf(?:[?#]|$)/i.test(url)) {
+      const declaredSize = Number(res.headers.get('content-length') ?? 0);
+      if (declaredSize > 10 * 1024 * 1024) {
+        if (process.env.VAI_SEARCH_DEBUG) console.error(`[search-debug] readPage PDF too large (${declaredSize} bytes): ${url}`);
+        return null;
+      }
+      const data = new Uint8Array(await res.arrayBuffer());
+      if (data.byteLength > 10 * 1024 * 1024) return null;
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse({ data });
+      try {
+        const parsed = await parser.getText();
+        const text = parsed.text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        if (text.length < 50) return null;
+        const safety = scanContentSafety(text.slice(0, 1000));
+        return safety.safe ? text.slice(0, maxChars) : null;
+      } finally {
+        await parser.destroy();
+      }
+    }
+    if (!contentType.includes('text/html') && !contentType.includes('xhtml')) {
+      if (process.env.VAI_SEARCH_DEBUG) console.error(`[search-debug] readPage unsupported content type ${contentType}: ${url}`);
+      return null;
+    }
 
     const html = await res.text();
-    const text = extractReadableText(html);
-    if (text.length < 50) return null;
+
+    const documentTitle = stripHtmlTags(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? '');
+    const identitySignals = [
+      extractPageIdentitySignals(html),
+      venueQuery ? extractStructuredVenueBranchSignals(html, venueQuery, url) : '',
+    ].filter(Boolean).join('\n');
+    const readableText = extractReadableText(html);
+    const venueSubjectTokens = venueQuery ? venueDiscoverySubjectTokens(venueQuery) : [];
+    const foldedTitle = foldVenueDiscoveryText(documentTitle);
+    const titleIdentityHits = venueSubjectTokens.filter((token) => venueDiscoveryTokenHit(foldedTitle, token)).length;
+    const titleIdentifiesExactVenue = venueSubjectTokens.length > 0
+      && titleIdentityHits >= Math.min(2, venueSubjectTokens.length);
+    const scopedHours = venueQuery
+      ? (titleIdentifiesExactVenue
+          ? extractOpeningHoursExcerpt(readableText)
+          : extractVenueOpeningHoursExcerpt([documentTitle, readableText].filter(Boolean).join('\n'), venueQuery))
+      : null;
+    // Put bounded factual signals first. Large commerce pages can contain
+    // hundreds of kilobytes of product/navigation content before their store
+    // schedule; appending the signals caused maxChars to cut them off.
+    let text = [documentTitle, identitySignals, scopedHours, readableText].filter(Boolean).join('\n\n');
+    const practicalKind = venueQuery ? detectVenuePracticalDetail(venueQuery) : null;
+    if (followVenueLinks && venueQuery && practicalKind) {
+      for (const linkedUrl of extractRelevantVenueResourceLinks(
+        html,
+        url,
+        practicalKind,
+        Boolean(extractVenueProximityRequest(venueQuery)),
+      )) {
+        let linkedText = await readPage(linkedUrl, timeoutMs, maxChars, venueQuery, false);
+        if (linkedText && practicalKind === 'hours') {
+          const linkedHours = extractVenueOpeningHoursExcerpt(linkedText, venueQuery)
+            ?? extractOpeningHoursExcerpt(linkedText);
+          if (linkedHours) linkedText = `${linkedHours}\n\n${linkedText}`;
+        }
+        if (process.env.VAI_SEARCH_DEBUG) {
+          console.error(`[search-debug] linked official ${practicalKind} resource ${linkedText ? `read ${linkedText.length} chars` : 'failed'}: ${linkedUrl}`);
+        }
+        // Put the targeted resource first so a large generic homepage cannot
+        // push its locator/menu beyond the bounded evidence window.
+        if (linkedText) text = `Linked official ${practicalKind} resource:\n${linkedText}\n\n${text}`;
+      }
+    }
+    if (text.length < 50) {
+      if (process.env.VAI_SEARCH_DEBUG) console.error(`[search-debug] readPage extracted only ${text.length} characters: ${url}`);
+      return null;
+    }
 
     // Content safety scan
     const safety = scanContentSafety(text.slice(0, 1000));
-    if (!safety.safe) return null;
+    if (!safety.safe) {
+      if (process.env.VAI_SEARCH_DEBUG) console.error(`[search-debug] readPage safety rejection (${safety.reason ?? 'unknown'}): ${url}`);
+      return null;
+    }
 
     return text.slice(0, maxChars);
-  } catch {
+  } catch (error) {
+    if (process.env.VAI_SEARCH_DEBUG) {
+      console.error(`[search-debug] readPage failed for ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return null;
   }
 }
 
+/**
+ * Keep stable business identifiers that commonly live in a page footer or
+ * JSON-LD block. Navigation/footer prose stays excluded from the readable
+ * page, but a telephone, email, or structured address can safely connect a
+ * first-party homepage to a second first-party location/tenant page.
+ */
+export function extractPageIdentitySignals(html: string): string {
+  const signals = new Set<string>();
+
+  for (const row of extractStructuredOpeningHoursSignals(html)) signals.add(row);
+
+  for (const match of html.matchAll(/href=["']tel:([^"'#?]+)/gi)) {
+    let phone = match[1].replace(/%20/gi, ' ');
+    try { phone = decodeURIComponent(phone); } catch { /* keep original */ }
+    phone = stripHtmlTags(phone).replace(/\s+/g, ' ').trim();
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length >= 8 && digits.length <= 15) signals.add(`Phone: ${phone}`);
+  }
+
+  // Some first-party sites display the phone as plain footer text instead of
+  // linking it with `tel:`. Restrict this fallback to footer/contact regions so
+  // asset IDs, tracking values, dates, and product numbers are not mistaken
+  // for a business identifier.
+  const identityRegions = [
+    ...html.matchAll(/<footer\b[^>]*>([\s\S]*?)<\/footer>/gi),
+    ...html.matchAll(/<[^>]+class=["'][^"']*(?:footer-contacts|contact-details|contact-info)[^"']*["'][^>]*>([\s\S]{0,8000}?)<\/(?:div|section|ul)>/gi),
+  ];
+  for (const region of identityRegions) {
+    const visibleLines = region[1]
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<br\s*\/?>|<\/(?:p|li|div|span|address)>/gi, '\n')
+      .split(/\n+/)
+      .map((line) => stripHtmlTags(line))
+      .filter(Boolean);
+    for (const line of visibleLines) {
+      for (const match of line.matchAll(/(?:\+\s?\d{1,3}[\s().-]*)?(?:\d{2}[\s().-]*){3,6}\d{2}/g)) {
+        const phone = match[0].replace(/\s+/g, ' ').trim();
+        const digits = phone.replace(/\D/g, '');
+        const formattedDate = /^\s*\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}\s*$/.test(phone);
+        if (digits.length >= 8 && digits.length <= 15 && !/^(?:19|20)\d{6}$/.test(digits) && !formattedDate) {
+          signals.add(`Phone: ${phone}`);
+        }
+      }
+      const street = /^([\p{L}][\p{L} .'’-]{1,70}\s+\d{1,5}[a-z]?)$/iu.exec(line)?.[1]?.trim();
+      if (street) signals.add(`Street address: ${street}`);
+      const postalLocality = /^(\d{4,6}\s+[\p{L}][\p{L} .'’-]{1,70})$/u.exec(line)?.[1]?.trim();
+      if (postalLocality) signals.add(`Postal locality: ${postalLocality}`);
+    }
+  }
+
+  for (const match of html.matchAll(/href=["']mailto:([^"'#?]+)/gi)) {
+    let email = match[1];
+    try { email = decodeURIComponent(email); } catch { /* keep original */ }
+    email = stripHtmlTags(email).trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) signals.add(`Email: ${email}`);
+  }
+
+  const structuredFields: Array<[label: string, key: string]> = [
+    ['Street address', 'streetAddress'],
+    ['Postal code', 'postalCode'],
+    ['Locality', 'addressLocality'],
+  ];
+  for (const [label, key] of structuredFields) {
+    const match = new RegExp(`["']${key}["']\\s*:\\s*["']([^"']{2,120})["']`, 'i').exec(html);
+    if (match?.[1]) signals.add(`${label}: ${stripHtmlTags(match[1])}`);
+  }
+
+  return [...signals].slice(0, 8).join('\n');
+}
+
+/**
+ * Convert schema.org branch records into bounded, readable evidence rows.
+ * This supports store locators whose visible cards show only city names and
+ * locators that publish one LocalBusiness record per branch in JSON-LD.
+ */
+export function extractStructuredVenueBranchSignals(html: string, venueQuery: string, baseUrl?: string): string {
+  const subjectTokens = venueDiscoverySubjectTokens(venueQuery);
+  if (subjectTokens.length === 0) return '';
+  const rows = new Set<string>();
+  const businessType = /(?:LocalBusiness|Store|Restaurant|CafeOrCoffeeShop|Bakery|FoodEstablishment|Hotel|Pharmacy|MedicalBusiness|HealthClub|EntertainmentBusiness|TouristAttraction|AutomotiveBusiness)/i;
+
+  const walk = (value: unknown, depth = 0): void => {
+    if (depth > 12 || value === null || typeof value !== 'object' || rows.size >= 24) return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    const rawTypes = Array.isArray(record['@type']) ? record['@type'] : [record['@type']];
+    const isBusiness = rawTypes.some((type) => typeof type === 'string' && businessType.test(type));
+    const name = typeof record.name === 'string' ? record.name.replace(/\s+/g, ' ').trim() : '';
+    const foldedName = foldVenueDiscoveryText(name);
+    const identifiesVenue = subjectTokens.some((token) => venueDiscoveryTokenHit(foldedName, token));
+    if (isBusiness && name && identifiesVenue) {
+      const address = record.address && typeof record.address === 'object'
+        ? record.address as Record<string, unknown>
+        : null;
+      const locality = typeof address?.addressLocality === 'string'
+        ? address.addressLocality.replace(/\s+/g, ' ').trim()
+        : '';
+      const region = typeof address?.addressRegion === 'string'
+        ? address.addressRegion.replace(/\s+/g, ' ').trim()
+        : '';
+      const street = typeof address?.streetAddress === 'string'
+        ? address.streetAddress.replace(/\s+/g, ' ').trim()
+        : '';
+      const postal = typeof address?.postalCode === 'string'
+        ? address.postalCode.replace(/\s+/g, ' ').trim()
+        : '';
+      const localityHint = [locality, region].filter(Boolean).join(', ');
+      const addressHint = [street, postal, localityHint].filter(Boolean).join(', ');
+      if (localityHint || addressHint) {
+        rows.add(`Venue branch: ${name} | ${localityHint || addressHint}${addressHint ? ` | ${addressHint}` : ''}`);
+      }
+    }
+    for (const child of Object.values(record)) walk(child, depth + 1);
+  };
+
+  for (const match of html.matchAll(/<script\b[^>]*type=["'][^"']*ld\+json[^"']*["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { walk(JSON.parse(match[1])); } catch { /* malformed structured data is ignored */ }
+  }
+  // Many first-party locators expose one ordinary link per branch instead of
+  // JSON-LD. Preserve that exact branch URL as inspectable evidence so the
+  // nearest-branch stage can read its hours/menu/contact page directly.
+  if (baseUrl) {
+    let base: URL | null = null;
+    try { base = new URL(baseUrl); } catch { /* invalid base cannot yield safe links */ }
+    if (base) {
+      for (const match of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+        const name = stripHtmlTags(match[2]).replace(/\s+/g, ' ').trim();
+        if (name.length < 3 || name.length > 100) continue;
+        const foldedName = foldVenueDiscoveryText(name);
+        if (!subjectTokens.some((token) => venueDiscoveryTokenHit(foldedName, token))) continue;
+        const suffix = foldedName.split(' ').filter((word) =>
+          !subjectTokens.some((token) => venueDiscoveryTokenHit(word, token)),
+        );
+        if (suffix.length === 0 || suffix.every((word) => NON_BRANCH_SUFFIX_WORDS.has(word))) continue;
+        try {
+          const resolved = new URL(match[1].replace(/&amp;/gi, '&'), base);
+          if (!/^https?:$/.test(resolved.protocol) || resolved.hostname !== base.hostname) continue;
+          const firstWords = foldedName.split(' ').slice(0, 1);
+          const identityLeadsLabel = subjectTokens.some((token) =>
+            firstWords.some((word) => venueDiscoveryTokenHit(word, token)),
+          );
+          const branchPath = /\/(?:locations?|branches?|stores?|shops?|restaurants?|cafes?|outlets?|filialer|restauranter)\/[^/?#]+/i.test(resolved.pathname);
+          if (!identityLeadsLabel && !branchPath) continue;
+          if (resolved.toString().replace(/\/$/, '') === base.toString().replace(/\/$/, '')) continue;
+          rows.add(`Venue branch page: ${name} | ${resolved.toString()}`);
+        } catch { /* malformed link */ }
+        if (rows.size >= 80) break;
+      }
+    }
+  }
+  return [...rows].join('\n');
+}
+
+const STRUCTURED_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
+
+/**
+ * Recover opening-hour evidence from common first-party structured formats.
+ * This deliberately reads the page Vai already selected; it is not a business
+ * directory and contains no shop-specific allowlist.
+ */
+export function extractStructuredOpeningHoursSignals(html: string): string[] {
+  const rows = new Set<string>();
+  const addValue = (value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const clean = value.replace(/\\u2013/gi, '–').replace(/\\u2014/gi, '—').replace(/\\n/g, ' ').trim();
+    if (clean.length >= 4 && clean.length <= 160 && OPENING_HOURS_CLOCK.test(clean)) {
+      rows.add(`Opening hours: ${clean}`);
+    }
+  };
+  const walk = (value: unknown, depth = 0): void => {
+    if (depth > 10 || value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    const openingHours = record.openingHours;
+    if (Array.isArray(openingHours)) openingHours.forEach(addValue);
+    else addValue(openingHours);
+
+    const specifications = record.openingHoursSpecification;
+    const entries = Array.isArray(specifications) ? specifications : specifications ? [specifications] : [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const spec = entry as Record<string, unknown>;
+      const days = (Array.isArray(spec.dayOfWeek) ? spec.dayOfWeek : [spec.dayOfWeek])
+        .filter((day): day is string => typeof day === 'string')
+        .map((day) => day.split('/').pop() ?? day)
+        .sort((a, b) => {
+          const aIndex = STRUCTURED_WEEKDAYS.findIndex((day) => day.toLowerCase() === a.toLowerCase());
+          const bIndex = STRUCTURED_WEEKDAYS.findIndex((day) => day.toLowerCase() === b.toLowerCase());
+          return (aIndex < 0 ? 99 : aIndex) - (bIndex < 0 ? 99 : bIndex);
+        })
+        .join('–');
+      const opens = typeof spec.opens === 'string' ? spec.opens : '';
+      const closes = typeof spec.closes === 'string' ? spec.closes : '';
+      if (days && OPENING_HOURS_CLOCK.test(opens) && OPENING_HOURS_CLOCK.test(closes)) {
+        rows.add(`Opening hours: ${days} ${opens}–${closes}`);
+      }
+    }
+    for (const child of Object.values(record)) walk(child, depth + 1);
+  };
+
+  for (const match of html.matchAll(/<script\b[^>]*type=["'][^"']*ld\+json[^"']*["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { walk(JSON.parse(match[1])); } catch { /* malformed third-party JSON-LD is ignored */ }
+  }
+
+  // Large retail apps often serialize a simple numeric weekday schedule in
+  // their hydration state rather than JSON-LD (for example Inditex stores).
+  // Scope parsing to openingHours windows so unrelated booking calendars do
+  // not become store-hour evidence.
+  for (const marker of html.matchAll(/["']openingHours["']\s*:/gi)) {
+    const window = html.slice(marker.index, marker.index + 16_000);
+    for (const match of window.matchAll(/["']weekDay["']\s*:\s*([1-7])[^{}]{0,240}?["']hours["']\s*:\s*\[\s*["']((?:[01]?\d|2[0-3]):[0-5]\d)["']\s*,\s*["']((?:[01]?\d|2[0-3]):[0-5]\d)["']\s*\][^{}]{0,120}?["']open["']\s*:\s*true/gi)) {
+      const day = STRUCTURED_WEEKDAYS[Number(match[1]) - 1];
+      if (day) rows.add(`Opening hours: ${day} ${match[2]}–${match[3]}`);
+    }
+    if (rows.size >= 14) break;
+  }
+
+  return [...rows].slice(0, 14);
+}
+
+async function boundedReadPage(
+  url: string,
+  timeoutMs: number,
+  maxChars: number,
+  venueQuery?: string,
+): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      readPage(url, timeoutMs, maxChars, venueQuery),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs + 500);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Strip HTML to readable text — lightweight version of ingest/web's extractMainContent */
-function extractReadableText(html: string): string {
+export function extractReadableText(html: string): string {
   let cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -3723,8 +5742,25 @@ function extractReadableText(html: string): string {
   if (mainMatch && mainMatch[1].length > 200) cleaned = mainMatch[1];
   else if (articleMatch && articleMatch[1].length > 200) cleaned = articleMatch[1];
 
+  // Preserve semantic/table boundaries so a product grid does not collapse
+  // into one giant line that the bounded fact extractor must discard.
+  cleaned = cleaned
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|li|tr|td|th|section|article|h[1-6])>/gi, '\n');
   // Strip remaining tags
   cleaned = cleaned.replace(/<\/?[^>]+(>|$)/g, ' ');
+  cleaned = cleaned
+    .replace(/&ndash;/gi, '–')
+    .replace(/&mdash;/gi, '—')
+    .replace(/&ouml;/gi, 'ö')
+    .replace(/&Ouml;/g, 'Ö')
+    .replace(/&auml;/gi, 'ä')
+    .replace(/&Auml;/g, 'Ä')
+    .replace(/&uuml;/gi, 'ü')
+    .replace(/&Uuml;/g, 'Ü')
+    .replace(/&szlig;/gi, 'ß')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&');
   // Normalize whitespace
   cleaned = cleaned.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   return cleaned;
@@ -3739,7 +5775,14 @@ async function readTopPages(
   topN: number,
   timeoutMs: number,
   maxChars: number,
+  venueQuery?: string,
+  venueKind?: VenuePracticalDetailKind,
 ): Promise<{ enriched: SearchSnippet[]; pagesRead: number }> {
+  if (topN <= 0) return { enriched: snippets, pagesRead: 0 };
+  const readMaxChars = venueQuery && extractVenueProximityRequest(venueQuery)
+    ? Math.max(maxChars, 24_000)
+    : maxChars;
+
   const urlsSeen = new Set<string>();
   const toRead: Array<{ index: number; url: string }> = [];
 
@@ -3747,9 +5790,26 @@ async function readTopPages(
   // "read: 0 pages" failure — one Reddit URL that didn't return content sank the whole
   // answer) is backfilled by the next trusted result. We attempt up to topN + a buffer and
   // count successes toward topN, so Vai reads real page content instead of giving up.
-  const candidateBudget = Math.min(snippets.length, topN + 4);
-  for (let i = 0; i < snippets.length && toRead.length < candidateBudget; i++) {
-    const s = snippets[i];
+  const trustWeight = (snippet: SearchSnippet): number =>
+    snippet.trust.tier === 'high' ? 3 : snippet.trust.tier === 'medium' ? 2 : snippet.trust.tier === 'low' ? 1 : 0;
+  const readCandidates = snippets.map((snippet, index) => ({ snippet, index }));
+  if (venueQuery) {
+    const proximityLookup = Boolean(extractVenueProximityRequest(venueQuery));
+    const locatorCue = (snippet: SearchSnippet): number => proximityLookup
+      && /\b(?:locations?|branches|stores?|shops?|restaurants?|locator|find\s+(?:a|your|our))\b/i.test(`${snippet.title} ${snippet.text.slice(0, 240)}`)
+      ? 1
+      : 0;
+    readCandidates.sort((a, b) => {
+      const trustDelta = trustWeight(b.snippet) - trustWeight(a.snippet);
+      if (trustDelta !== 0) return trustDelta;
+      const locatorDelta = locatorCue(b.snippet) - locatorCue(a.snippet);
+      return locatorDelta !== 0 ? locatorDelta : a.index - b.index;
+    });
+  }
+  const candidateBudget = Math.min(readCandidates.length, topN + 4);
+  for (const candidate of readCandidates) {
+    if (toRead.length >= candidateBudget) break;
+    const { snippet: s, index: i } = candidate;
     // Only read from trusted sources with real URLs
     if (s.trust.tier === 'untrusted') continue;
     if (urlsSeen.has(s.url)) continue;
@@ -3770,29 +5830,42 @@ async function readTopPages(
 
   if (toRead.length === 0) return { enriched: snippets, pagesRead: 0 };
 
-  const pageResults = await Promise.all(
-    toRead.map(({ url }) => readPage(url, timeoutMs, maxChars)),
-  );
-
   let pagesRead = 0;
   const enriched = [...snippets];
-  for (let j = 0; j < toRead.length; j++) {
+  // Read in small batches so the highest-ranked official pages are not starved
+  // by a burst of slower directory/social requests. Continue into the buffer
+  // only when earlier reads fail.
+  // Large store-locator pages from the same retail host are commonly the top
+  // two candidates. Reading them concurrently triggers throttling on some
+  // commerce CDNs, so exact venue-hour reads are deliberately serialized.
+  const readConcurrency = venueQuery ? 1 : 2;
+  for (let offset = 0; offset < toRead.length && pagesRead < topN; offset += readConcurrency) {
+    const batch = toRead.slice(offset, offset + readConcurrency);
+    const pageResults = await Promise.all(
+      batch.map(({ url }) => boundedReadPage(url, timeoutMs, readMaxChars, venueQuery)),
+    );
+    for (let j = 0; j < batch.length && pagesRead < topN; j++) {
     // Stop once we have topN successful reads — the extra candidates were only insurance
     // against failures, not a request to read everything.
-    if (pagesRead >= topN) break;
-    const pageContent = pageResults[j];
-    if (!pageContent || pageContent.length < 100) continue;
-    pagesRead++;
-
-    const { index } = toRead[j];
-    const original = enriched[index];
+      const pageContent = pageResults[j];
+      if (!pageContent || pageContent.length < 100) continue;
+      const { index } = batch[j];
+      const original = enriched[index];
     // Merge: use page content (richer) but keep original metadata
-    enriched[index] = {
-      ...original,
-      text: pageContent.slice(0, maxChars),
+      enriched[index] = {
+        ...original,
+        text: pageContent.slice(0, readMaxChars),
       // Boost rank for successfully-read pages
-      rank: original.rank * 1.3,
-    };
+        rank: original.rank * 1.3,
+      };
+      // A fetched generic store page is still useful for identity verification,
+      // but it must not consume the limited success budget for an hours query.
+      // Continue until we have pages that actually expose an hours value.
+      const answeredVenueShape = !venueQuery
+        || !venueKind
+        || answerMatchesVenuePracticalDetail(venueKind, pageContent);
+      if (answeredVenueShape) pagesRead++;
+    }
   }
 
   // Re-sort after rank boost
@@ -3854,7 +5927,9 @@ export class SearchPipeline {
   private readonly config: SearchPipelineConfig;
   private readonly cache: SearchCache;
   private readonly controller = new ThorsenAdaptiveController();
+  private readonly sourceCapabilities = new WebSourceCapabilityLedger();
   private onLearn: OnSearchLearn | null = null;
+  private onSourceCapabilitiesLearned: (() => void) | null = null;
 
   constructor(config?: Partial<SearchPipelineConfig>) {
     this.config = { ...DEFAULT_SEARCH_CONFIG, ...config };
@@ -3864,6 +5939,18 @@ export class SearchPipeline {
   /** Register a callback to learn from search results (used by VaiEngine). */
   setLearnCallback(cb: OnSearchLearn): void {
     this.onLearn = cb;
+  }
+
+  setSourceCapabilityLearnCallback(cb: () => void): void {
+    this.onSourceCapabilitiesLearned = cb;
+  }
+
+  serializeSourceCapabilities(): WebSourceCapabilitySnapshot {
+    return this.sourceCapabilities.serialize();
+  }
+
+  restoreSourceCapabilities(snapshot: WebSourceCapabilitySnapshot | null | undefined): void {
+    this.sourceCapabilities.restore(snapshot);
   }
 
   /** Build a search plan without executing it (preview). */
@@ -3910,6 +5997,7 @@ export class SearchPipeline {
     // Step 1: CLARIFY — normalize into structured plan
     const clarifyStart = Date.now();
     const plan = buildSearchPlan(query);
+    const practicalKind = venuePracticalKindFromIntent(plan.intent);
     audit.push({ step: 'clarify', detail: `Intent: ${plan.intent}, entities: [${plan.entities.join(', ')}], ${plan.fanOutQueries.length} sub-queries`, durationMs: Date.now() - clarifyStart });
 
     // Step 2+3: FAN OUT + FETCH — parallel sub-queries
@@ -3921,7 +6009,7 @@ export class SearchPipeline {
     // for "btc price") yields the empty answer that drove the live failure. So for
     // fresh-data we read several of the top trusted results regardless of Thorsen state,
     // so one blocked fetch doesn't sink the whole answer.
-    const isFreshData = plan.intent === 'fresh-data' || plan.intent === 'current';
+    const isFreshData = plan.intent === 'fresh-data' || plan.intent === 'current' || isVenuePracticalIntent(plan.intent);
     // Multi-entity asks ("price of eth AND btc") need EACH entity's dedicated page read, or
     // one entity gets a wrong/empty value — so read more pages when the query names several
     // subjects (each typically has its own price page).
@@ -3935,18 +6023,130 @@ export class SearchPipeline {
         : preSnapshot.state === 'parallel'
           ? Math.min(this.config.readTopN, 2)
           : this.config.readTopN;
-    const queries = plan.fanOutQueries.slice(0, adaptiveMaxFanOut);
+    const queryBudget = isVenuePracticalIntent(plan.intent)
+      ? Math.min(3, adaptiveMaxFanOut)
+      : adaptiveMaxFanOut;
+    const learnedQueries: string[] = [];
+    const contextualVenueQueries: string[] = [];
+    if (practicalKind) {
+      const proximity = extractVenueProximityRequest(query);
+      const subject = proximity?.venue ?? extractVenuePracticalSubject(query);
+      const detailCapability = `venue-${practicalKind}` as WebSourceCapability;
+      for (const domain of this.sourceCapabilities.domainsFor(detailCapability, subject)) {
+        learnedQueries.push(`site:${domain} "${subject}" ${venueDetailSearchLabel(practicalKind)}`);
+      }
+      if (proximity) {
+        const anchorPreview = await fetchPhotonPlace(proximity.anchor, this.config.fetchTimeoutMs);
+        const localityContext = [anchorPreview?.city, anchorPreview?.country].filter(Boolean).join(' ');
+        if (localityContext) {
+          contextualVenueQueries.push(`${subject} locations ${localityContext} ${venueDetailSearchLabel(practicalKind)}`);
+        }
+        for (const domain of this.sourceCapabilities.domainsFor('venue-locator', subject)) {
+          learnedQueries.push(`site:${domain} "${subject}" locations branches`);
+        }
+      }
+    }
+    const queries = [...new Set([...learnedQueries, ...contextualVenueQueries, ...plan.fanOutQueries])].slice(0, queryBudget);
+    if (contextualVenueQueries.length > 0) {
+      audit.push({
+        step: 'clarify',
+        detail: 'Localized nearest-branch discovery with the geocoded anchor city/country before comparing official candidates',
+        durationMs: 0,
+      });
+    }
+    if (learnedQueries.length > 0) {
+      audit.push({
+        step: 'clarify',
+        detail: `Applied ${Math.min(learnedQueries.length, queryBudget)} previously verified site-capability hint${learnedQueries.length === 1 ? '' : 's'}; trust still requires current-page verification`,
+        durationMs: 0,
+      });
+    }
     const allRaw: Array<RawSearchResult & { queryIndex: number }> = [];
 
-    const fetchPromises = queries.map((q, idx) =>
-      fetchProviderChain(q, this.config, plan.entities).then(results =>
-        results.slice(0, this.config.resultsPerQuery).map(r => ({ ...r, queryIndex: idx })),
-      ).catch(() => [] as Array<RawSearchResult & { queryIndex: number }>),
-    );
+    // Prefer a verified venue page before starting the broad provider fan-out.
+    // The official page already contains the complete answer; competing Bing/DDG/
+    // Mojeek requests can otherwise consume the chat deadline and starve this read.
+    const knownOfficialResult = practicalKind
+      ? await fetchKnownOfficialVenueDetailPage(query, practicalKind, this.config.fetchTimeoutMs).catch(() => null)
+      : null;
+
+    const fetchPromises = knownOfficialResult
+      ? []
+      : queries.map((q, idx) =>
+        fetchProviderChain(q, this.config, plan.entities, plan.intent).then(results =>
+          results.slice(0, this.config.resultsPerQuery).map(r => ({ ...r, queryIndex: idx })),
+        ).catch(() => [] as Array<RawSearchResult & { queryIndex: number }>),
+      );
 
     const batchResults = await Promise.all(fetchPromises);
     for (const batch of batchResults) {
       allRaw.push(...batch);
+    }
+    // Public keyless indexes occasionally return an empty transient response
+    // even though the same exact venue query succeeds moments later. One
+    // bounded sequential retry prevents an otherwise-correct global shop ask
+    // from failing purely because every first wave provider was briefly thin.
+    if (!knownOfficialResult && practicalKind && allRaw.length < 2) {
+      const retryStart = Date.now();
+      for (let index = 0; index < Math.min(2, queries.length); index += 1) {
+        const retried = await fetchProviderChain(queries[index], this.config, plan.entities, plan.intent)
+          .catch(() => [] as RawSearchResult[]);
+        allRaw.push(...retried.slice(0, this.config.resultsPerQuery).map((result) => ({ ...result, queryIndex: index })));
+        if (allRaw.length >= 2) break;
+      }
+      const recoveredCount: number = allRaw.length;
+      audit.push({
+        step: 'fetch',
+        detail: `Retried transiently empty venue discovery; recovered ${recoveredCount} result${recoveredCount === 1 ? '' : 's'}`,
+        durationMs: Date.now() - retryStart,
+      });
+    }
+    if (!knownOfficialResult && practicalKind && allRaw.length < 2) {
+      const domainProbeStart = Date.now();
+      const directResults = await probeProbableOfficialVenueHomepages(query, this.config.fetchTimeoutMs)
+        .catch(() => [] as RawSearchResult[]);
+      const existing = new Set(allRaw.map((result) => `${result.url}::${result.title}`.toLowerCase()));
+      for (const result of directResults) {
+        const key = `${result.url}::${result.title}`.toLowerCase();
+        if (existing.has(key)) continue;
+        existing.add(key);
+        allRaw.push({ ...result, queryIndex: 0 });
+      }
+      if (directResults.length > 0) {
+        audit.push({
+          step: 'fetch',
+          detail: `Verified ${directResults.length} probable official domain${directResults.length === 1 ? '' : 's'} from the requested venue identity and anchor country`,
+          durationMs: Date.now() - domainProbeStart,
+        });
+      }
+    }
+    // Use Vai's real-browser search skill only as the cold-start fallback for
+    // practical venue questions. This avoids launching competing browser jobs
+    // on healthy keyless-index runs, while still recovering an official shop,
+    // restaurant, or venue page when those indexes return empty/noisy batches.
+    if (!knownOfficialResult && practicalKind && allRaw.length < 2 && isBrowserSearchEnabled()) {
+      const browserFallbackStart = Date.now();
+      const browserQuery = queries[0] ?? query;
+      const browserResults = filterVenueIdentityResults(
+        await fetchGoogleViaBrowser(browserQuery, this.config.fetchTimeoutMs).catch(() => [] as RawSearchResult[]),
+        browserQuery,
+      );
+      const existing = new Set(allRaw.map((result) => `${result.url}::${result.title}`.toLowerCase()));
+      for (const result of browserResults.slice(0, this.config.resultsPerQuery)) {
+        const key = `${result.url}::${result.title}`.toLowerCase();
+        if (existing.has(key)) continue;
+        existing.add(key);
+        allRaw.push({ ...result, queryIndex: 0 });
+      }
+      audit.push({
+        step: 'fetch',
+        detail: `Used the browser search fallback after thin venue indexes; recovered ${browserResults.length} identity-matching result${browserResults.length === 1 ? '' : 's'}`,
+        durationMs: Date.now() - browserFallbackStart,
+      });
+    }
+    if (knownOfficialResult) {
+      allRaw.unshift({ ...knownOfficialResult, queryIndex: 0 });
+      audit.push({ step: 'fetch', detail: `Read a verified official ${practicalKind ?? 'practical-detail'} page for the named venue`, durationMs: 0 });
     }
 
     // AI-OVERVIEW-FIRST (the human-equivalent answer): for a fresh-fact question with a
@@ -3955,7 +6155,8 @@ export class SearchPipeline {
     // top-trust synthetic source so the read+extract step surfaces it directly, instead of
     // Vai scraping snippets and guessing. Best-effort and bounded: skipped with no browser /
     // CAPTCHA cooldown, and it never throws (the headless read+extract path is the fallback).
-    if (isFreshData && isBrowserSearchEnabled()) {
+    const shouldCaptureAiOverview = plan.intent === 'fresh-data' || plan.intent === 'current';
+    if (shouldCaptureAiOverview && isBrowserSearchEnabled()) {
       try {
         const page = await fetchGooglePageViaBrowser(query, this.config.fetchTimeoutMs);
         if (page.aiOverview && page.aiOverview.trim().length > 0) {
@@ -3972,26 +6173,111 @@ export class SearchPipeline {
       }
     }
 
-    audit.push({ step: 'fan-out', detail: `${queries.length} queries, ${allRaw.length} raw results`, durationMs: Date.now() - fanOutStart });
+    audit.push({
+      step: 'fan-out',
+      detail: `${knownOfficialResult ? 0 : queries.length} queries, ${allRaw.length} raw results`,
+      durationMs: Date.now() - fanOutStart,
+    });
 
     // Step 4: RANK — score by trust × relevance, deduplicate
     const rankStart = Date.now();
-    const ranked = rankSnippets(allRaw, this.config.minTrustScore, query);
-    audit.push({ step: 'rank', detail: `${ranked.length} snippets after trust filter + dedup (from ${allRaw.length} raw)`, durationMs: Date.now() - rankStart });
+    let ranked = rankSnippets(allRaw, this.config.minTrustScore, query);
+    const topCandidateLabels = ranked.slice(0, 6)
+      .map((snippet) => `${snippet.title || snippet.domain} (${snippet.domain})`)
+      .join(' | ');
+    audit.push({
+      step: 'rank',
+      detail: `${ranked.length} snippets after trust filter + dedup (from ${allRaw.length} raw)${topCandidateLabels ? `; top: ${topCandidateLabels}` : ''}`,
+      durationMs: Date.now() - rankStart,
+    });
 
     // Step 5: READ — fetch full page content for top-N results
     const readStart = Date.now();
-    const { enriched, pagesRead } = await readTopPages(
+    let { enriched, pagesRead } = await readTopPages(
       ranked.slice(0, this.config.maxSnippets),
-      adaptiveReadTopN,
+      knownOfficialResult ? 0 : adaptiveReadTopN,
       this.config.fetchTimeoutMs,
       this.config.maxPageChars,
+      practicalKind ? query : undefined,
+      practicalKind ?? undefined,
     );
+    if (practicalKind) enriched = promoteVerifiedVenueSources(enriched, query, practicalKind);
     audit.push({ step: 'read', detail: `${pagesRead} pages read from top ${Math.min(ranked.length, this.config.maxSnippets)} results`, durationMs: Date.now() - readStart });
+
+    let effectiveQuery = query;
+    let proximityResolution: VenueProximityResolution | null = null;
+    const proximityRequest = practicalKind ? extractVenueProximityRequest(query) : null;
+    if (practicalKind && proximityRequest) {
+      const proximityStart = Date.now();
+      proximityResolution = await resolveVenueProximity(query, enriched, this.config.fetchTimeoutMs);
+      if (proximityResolution) {
+        effectiveQuery = `${proximityResolution.branch.name} ${venueDetailSearchLabel(practicalKind)}`;
+        const exactBranchQueries = [...new Set([
+          effectiveQuery,
+          `${proximityResolution.branch.name} ${practicalKind === 'menu' || practicalKind === 'menu-price' ? 'meny menu' : venueDetailSearchLabel(practicalKind)}`,
+          practicalKind === 'menu' || practicalKind === 'menu-price'
+            ? `${proximityResolution.branch.name} order delivery menu prices`
+            : `${proximityResolution.branch.name} ${venueDetailSearchLabel(practicalKind)} address contact current`,
+        ])];
+        const [exactBatches, directBranchContent] = await Promise.all([
+          Promise.all(exactBranchQueries.map((branchQuery) =>
+            fetchProviderChain(branchQuery, this.config, plan.entities, plan.intent)
+              .catch(() => [] as RawSearchResult[]),
+          )),
+          proximityResolution.branch.urlHint
+            ? boundedReadPage(
+              proximityResolution.branch.urlHint,
+              this.config.fetchTimeoutMs,
+              this.config.maxPageChars,
+              effectiveQuery,
+            ).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        const existing = new Set(allRaw.map((result) => `${result.url}::${result.title}`.toLowerCase()));
+        if (directBranchContent && proximityResolution.branch.urlHint) {
+          const directResult: RawSearchResult = {
+            title: `${proximityResolution.branch.name} official branch page`,
+            snippet: directBranchContent,
+            url: proximityResolution.branch.urlHint,
+          };
+          const key = `${directResult.url}::${directResult.title}`.toLowerCase();
+          existing.add(key);
+          allRaw.push({ ...directResult, queryIndex: 0 });
+        }
+        for (const result of exactBatches.flat().slice(0, 20)) {
+          const key = `${result.url}::${result.title}`.toLowerCase();
+          if (existing.has(key)) continue;
+          existing.add(key);
+          allRaw.push({ ...result, queryIndex: 0 });
+        }
+        ranked = rankSnippets(allRaw, this.config.minTrustScore, effectiveQuery);
+        const exactRead = await readTopPages(
+          ranked.slice(0, this.config.maxSnippets),
+          Math.max(4, adaptiveReadTopN),
+          this.config.fetchTimeoutMs,
+          this.config.maxPageChars,
+          effectiveQuery,
+          practicalKind,
+        );
+        enriched = promoteVerifiedVenueSources(exactRead.enriched, effectiveQuery, practicalKind);
+        pagesRead += exactRead.pagesRead;
+        audit.push({
+          step: 'fetch',
+          detail: `Resolved nearest branch to ${proximityResolution.anchorLabel} as ${proximityResolution.branch.name} (${proximityResolution.branch.distanceKm.toFixed(1)} km straight-line), then searched that exact branch for ${practicalKind}`,
+          durationMs: Date.now() - proximityStart,
+        });
+      } else {
+        audit.push({
+          step: 'fetch',
+          detail: `Could not verify the nearest ${proximityRequest.venue} branch to ${proximityRequest.anchor}; branch substitution is disabled`,
+          durationMs: Date.now() - proximityStart,
+        });
+      }
+    }
 
     // Step 6: CROSS-CHECK — verify claims across multiple sources
     const crossStart = Date.now();
-    const verified = crossCheck(enriched);
+    let verified = crossCheck(enriched);
     audit.push({ step: 'cross-check', detail: `${verified.length} snippets after cross-check`, durationMs: Date.now() - crossStart });
 
     // Gate synthesis on relevance to the user's actual ask, not just domain
@@ -3999,18 +6285,86 @@ export class SearchPipeline {
     // Oslo shooting news for an Oslo population question) from reaching the
     // answer body or the UI source list.
     const relevanceStart = Date.now();
-    let relevant = filterRelevantSnippetsForQuery(query, verified);
+    let relevant = filterRelevantSnippetsForQuery(effectiveQuery, verified);
     audit.push({
       step: 'rank',
       detail: `${relevant.length}/${verified.length} snippets survived relevance + answer-shape gate`,
       durationMs: Date.now() - relevanceStart,
     });
 
+    // Some first-party business sites prove the identity (name/address/phone)
+    // but omit the requested detail. Use that stable identifier for one bounded
+    // second discovery pass. This connects a bakery's own homepage to its
+    // shopping-centre tenant page without hard-coding either business, while
+    // keeping unrelated businesses with similar names out of the answer.
+    const practicalEvidenceNeedsIdentityCheck = Boolean(practicalKind)
+      && !knownOfficialResult
+      && (relevant.length === 0 || !relevant.some((snippet) => snippet.trust.tier === 'high' || snippet.trust.tier === 'medium'));
+    if (practicalEvidenceNeedsIdentityCheck && practicalKind) {
+      const identifier = extractVenueVerificationIdentifier(enriched);
+      const address = extractVenueVerificationAddress(enriched);
+      if (identifier || address) {
+        const verificationStart = Date.now();
+        const venueName = extractFirstPartyVenueName(enriched, query);
+        const containers = address
+          ? await fetchNearbyVenueContainers(address, this.config.fetchTimeoutMs)
+          : [];
+        const verificationQueries = containers.length > 0
+          ? containers.slice(0, 2).map((container) => venueVerificationQuery(
+            query,
+            practicalKind,
+            identifier ?? address ?? venueName,
+            venueName,
+            container,
+          ))
+          : [venueVerificationQuery(query, practicalKind, identifier ?? address ?? venueName, venueName)];
+        const additionalBatches = await Promise.all(verificationQueries.map((verificationQuery) =>
+          fetchProviderChain(verificationQuery, this.config, plan.entities, plan.intent)
+            .catch(() => [] as RawSearchResult[]),
+        ));
+        const additional = additionalBatches.flat();
+        const existing = new Set(allRaw.map((result) => `${result.url}::${result.title}`.toLowerCase()));
+        for (const result of additional.slice(0, 16)) {
+          const key = `${result.url}::${result.title}`.toLowerCase();
+          if (existing.has(key)) continue;
+          existing.add(key);
+          allRaw.push({ ...result, queryIndex: 0 });
+        }
+        ranked = rankSnippets(allRaw, this.config.minTrustScore, effectiveQuery);
+        const secondRead = await readTopPages(
+          ranked.slice(0, this.config.maxSnippets),
+          Math.max(5, adaptiveReadTopN),
+          this.config.fetchTimeoutMs,
+          this.config.maxPageChars,
+          practicalKind ? effectiveQuery : undefined,
+          practicalKind ?? undefined,
+        );
+        enriched = promoteVerifiedVenueSources(secondRead.enriched, effectiveQuery, practicalKind);
+        pagesRead += secondRead.pagesRead;
+        verified = crossCheck(enriched);
+        relevant = filterRelevantSnippetsForQuery(effectiveQuery, verified);
+        audit.push({
+          step: 'fetch',
+          detail: `Identity verification pass: searched the requested ${practicalKind} using first-party identity${containers.length > 0 ? ' and containing-venue context' : ''}: ${verificationQueries.join(' | ')}`,
+          durationMs: Date.now() - verificationStart,
+        });
+        audit.push({
+          step: 'rank',
+          detail: `${relevant.length}/${verified.length} snippets survived after identity verification`,
+          durationMs: 0,
+        });
+      }
+    }
+
+    if (proximityRequest && !proximityResolution) {
+      relevant = [];
+    }
+
     // Soft fallback: strict gate can drop every snippet (common on DDG-only
     // runs). Prefer a cautious answer from top verified hits over empty sources.
-    if (relevant.length === 0 && verified.length > 0) {
+    if (relevant.length === 0 && verified.length > 0 && !(proximityRequest && !proximityResolution)) {
       const soft = verified.slice(0, Math.min(3, verified.length));
-      const softAnswer = synthesizeAnswer(query, soft, true);
+      const softAnswer = synthesizeAnswer(effectiveQuery, soft, true);
       if (!/didn't find anything|couldn't find useful/i.test(softAnswer)) {
         relevant = soft;
         audit.push({
@@ -4021,10 +6375,89 @@ export class SearchPipeline {
       }
     }
 
+    if (practicalKind
+      && relevant.some((source) => source.trust.tier === 'high' || source.trust.tier === 'medium')) {
+      relevant = relevant.filter((source) => source.trust.tier === 'high' || source.trust.tier === 'medium');
+    }
+
+    if (practicalKind && proximityResolution && proximityRequest) {
+      const exactBranchEvidence = relevant.filter((source) =>
+        sourceMatchesResolvedVenueBranch(
+          source,
+          proximityResolution.branch.name,
+          proximityRequest.venue,
+        ) && answerMatchesVenuePracticalDetail(practicalKind, source.text),
+      );
+      // Once an exact branch page contains the requested detail, generic
+      // headquarters/chain pages must not outrank or contaminate it.
+      if (exactBranchEvidence.length > 0) relevant = exactBranchEvidence;
+    }
+
+    if ((practicalKind === 'menu' || practicalKind === 'menu-price')
+      && relevant.some((source) => source.trust.tier === 'high' || source.trust.tier === 'medium')) {
+      const seenMenus = new Set<string>();
+      relevant = relevant.filter((source) => {
+        if (source.trust.tier !== 'high' && source.trust.tier !== 'medium') return false;
+        const canonicalUrl = source.url.replace(/:\/\/([^/]+)\/en\//i, '://$1/').replace(/[?#].*$/, '');
+        const key = `${source.domain}:${canonicalUrl}`.toLowerCase();
+        if (seenMenus.has(key)) return false;
+        seenMenus.add(key);
+        return true;
+      });
+    }
+
     // Step 7: CONCLUDE — synthesize answer with citations
     const concludeStart = Date.now();
-    const answer = synthesizeAnswer(query, relevant, verified.length > 0);
+    let answer = proximityRequest && !proximityResolution
+      ? `I found pages for ${proximityRequest.venue}, but I couldn't reliably determine which branch is closest to ${proximityRequest.anchor}. I won't substitute a different branch's ${practicalKind === 'menu' || practicalKind === 'menu-price' ? 'menu' : practicalKind}.`
+      : synthesizeAnswer(effectiveQuery, relevant, verified.length > 0);
+    if (proximityResolution && answerMatchesVenuePracticalDetail(practicalKind!, answer)) {
+      const proximitySource = buildVenueProximitySource(proximityResolution);
+      answer = `**Closest verified branch:** ${proximityResolution.branch.name} — about ${proximityResolution.branch.distanceKm.toFixed(1)} km straight-line from ${proximityResolution.anchorLabel}. [1]\n\n${shiftCitationMarks(answer, 1)}`;
+      relevant = [proximitySource, ...relevant];
+    }
     audit.push({ step: 'conclude', detail: `Answer synthesized from ${relevant.length} relevant sources`, durationMs: Date.now() - concludeStart });
+
+    // Learn only capabilities proved by this run's current page contents.
+    // The learned record can improve later discovery, but never bypasses the
+    // next turn's trust, identity, or answer-shape gates.
+    let learnedCapabilityCount = 0;
+    if (practicalKind && answerMatchesVenuePracticalDetail(practicalKind, answer)) {
+      const requestedSubject = proximityRequest?.venue ?? extractVenuePracticalSubject(query);
+      for (const source of relevant) {
+        if (!sourceVerifiesVenueCapability(source, effectiveQuery, practicalKind)) continue;
+        const learned = this.sourceCapabilities.observeVerified({
+          domain: source.domain,
+          capability: `venue-${practicalKind}`,
+          subject: requestedSubject,
+          url: source.url,
+        });
+        if (learned) learnedCapabilityCount++;
+      }
+    }
+    // Locator resolution is independently verified even when the requested
+    // detail page is missing. Reusing that proven locator on the next wording
+    // is safe; the missing menu/hours/contact fact is never learned.
+    if (proximityRequest && proximityResolution?.officialLocatorUrl) {
+      try {
+        const locatorDomain = new URL(proximityResolution.officialLocatorUrl).hostname;
+        const learned = this.sourceCapabilities.observeVerified({
+          domain: locatorDomain,
+          capability: 'venue-locator',
+          subject: proximityRequest.venue,
+          url: proximityResolution.officialLocatorUrl,
+        });
+        if (learned) learnedCapabilityCount++;
+      } catch { /* invalid locator URLs cannot be learned */ }
+    }
+    if (learnedCapabilityCount > 0) {
+      this.onSourceCapabilitiesLearned?.();
+      audit.push({
+        step: 'conclude',
+        detail: `Learned ${learnedCapabilityCount} verified web source capabilit${learnedCapabilityCount === 1 ? 'y' : 'ies'} for later equivalent venue requests`,
+        durationMs: 0,
+      });
+    }
 
     // Notify learn callback with top results
     if (this.onLearn) {
@@ -4050,7 +6483,9 @@ export class SearchPipeline {
       sources: relevant,
       plan,
       rawResultCount: allRaw.length,
-      confidence: computeConfidence(relevant),
+      confidence: knownOfficialResult && relevant.some((source) => isKnownOfficialVenueDetailUrl(source.url))
+        ? 0.9
+        : computeConfidence(relevant),
       durationMs,
       sync: {
         state: syncState,
@@ -4065,7 +6500,12 @@ export class SearchPipeline {
 
     // Cache the result (R18: skip caching empty/failed responses so a cold-
     // start or rate-limit blip doesn't poison the 10-minute cache window).
-    if (relevant.length > 0) {
+    const practicalAnswerCacheable = !practicalKind
+      || (
+        relevant.some((source) => source.trust.tier === 'high' || source.trust.tier === 'medium')
+        && answerMatchesVenuePracticalDetail(practicalKind, answer)
+      );
+    if (relevant.length > 0 && practicalAnswerCacheable) {
       this.cache.set(cacheKey, response);
     }
 

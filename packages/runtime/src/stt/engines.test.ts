@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
+  builtinWarmupModels,
   chooseEngineForRequest,
   looksLikeGarbageTranscript,
+  transcriptDeservesEscalation,
   validateAudioMime,
   type SttStatusSnapshot,
 } from './engines.js';
+
+describe('builtinWarmupModels', () => {
+  it('warms the latency-critical game PTT model before the balanced model', () => {
+    expect(builtinWarmupModels('distil-whisper/distil-medium.en')).toEqual([
+      'onnx-community/whisper-base.en',
+      'distil-whisper/distil-medium.en',
+    ]);
+  });
+
+  it('does not load base.en twice when it is already configured', () => {
+    expect(builtinWarmupModels('onnx-community/whisper-base.en')).toEqual([
+      'onnx-community/whisper-base.en',
+    ]);
+  });
+});
 
 function mockStatus(overrides: Partial<SttStatusSnapshot> = {}): SttStatusSnapshot {
   return {
@@ -80,6 +97,29 @@ describe('chooseEngineForRequest', () => {
     });
     const choice = chooseEngineForRequest(status, 'audio/pcm-f32le;rate=16000', false);
     expect(choice?.source).toBe('builtin');
+  });
+});
+
+describe('transcriptDeservesEscalation', () => {
+  it('accepts a normal-density transcript', () => {
+    // ~2 words/sec — typical dictation over silence-trimmed audio.
+    expect(transcriptDeservesEscalation('Add a dark mode toggle to the settings panel please', 5)).toBe(false);
+  });
+
+  it('flags implausibly sparse output from long audio (dropped words)', () => {
+    // 8 seconds of kept (silence-trimmed) speech producing two words means the
+    // small model dropped most of the utterance.
+    expect(transcriptDeservesEscalation('Add toggle', 8)).toBe(true);
+  });
+
+  it('leaves short utterances alone', () => {
+    expect(transcriptDeservesEscalation('Stop', 1.2)).toBe(false);
+    expect(transcriptDeservesEscalation('Undo that', 2.4)).toBe(false);
+  });
+
+  it('never escalates empty text (no-speech handling owns that)', () => {
+    expect(transcriptDeservesEscalation('', 6)).toBe(false);
+    expect(transcriptDeservesEscalation('   ', 6)).toBe(false);
   });
 });
 

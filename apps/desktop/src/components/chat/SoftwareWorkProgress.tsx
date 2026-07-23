@@ -143,4 +143,16 @@ export function SoftwareWorkProgress({ live, steps, durationMs, outputFileCount 
                           {note.durationMs !== undefined && <time>{formatWorkDuration(note.durationMs)}</time>}
                         </li>
                       ))}
-              
+                    </ul>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export default SoftwareWorkProgress;

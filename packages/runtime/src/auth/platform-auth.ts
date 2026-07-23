@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { WorkOS } from '@workos-inc/node';
-import { and, eq, gt, lt, schema, type VaiConfig, type VaiDatabase } from '@vai/core';
+import { and, eq, gt, lt, or, schema, type VaiConfig, type VaiDatabase } from '@vai/core';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 
@@ -156,6 +156,19 @@ function parseBearerToken(authorization?: string): string | null {
   const [scheme, token] = authorization.split(' ');
   if (!scheme || !token || scheme.toLowerCase() !== 'bearer') return null;
   return token.trim() || null;
+}
+
+/** Decode the private desktop WebSocket auth subprotocol without ever accepting URL credentials. */
+export function parseWebSocketProtocolSessionToken(header: string | string[] | undefined): string | null {
+  const value = Array.isArray(header) ? header[0] : header;
+  const encoded = value?.split(',').map((entry) => entry.trim())
+    .find((entry) => entry.startsWith('vai.auth.'))?.slice('vai.auth.'.length);
+  if (!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
+  try {
+    return Buffer.from(encoded, 'base64url').toString('utf8').trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function buildCookie(name: string, value: string, maxAgeSeconds: number, secure: boolean): string {
@@ -359,10 +372,20 @@ export class PlatformAuthService {
       return { authenticated: false, role: 'builder', user: null, companionClient: null };
     }
 
-    const row = this.getViewerRowByTokenHash(session.tokenHash);
+    const row = this.getViewerRowByTokenHashes(session.tokenHash, session.legacyTokenHash);
 
     if (!row) {
       return { authenticated: false, role: 'builder', user: null, companionClient: null };
+    }
+
+    if (row.tokenHash !== session.tokenHash) {
+      // Transparently migrate pre-v2 session hashes while the configured legacy
+      // secret is still available. Future runtime configuration changes then no
+      // longer sign this desktop out.
+      this.db.update(schema.platformSessions)
+        .set({ tokenHash: session.tokenHash })
+        .where(eq(schema.platformSessions.id, row.sessionId))
+        .run();
     }
 
     this.touchSessionIfStale(row.sessionId, row.lastSeenAt);
@@ -594,9 +617,10 @@ export class PlatformAuthService {
     );
   }
 
-  private getViewerRowByTokenHash(tokenHash: string) {
+  private getViewerRowByTokenHashes(tokenHash: string, legacyTokenHash: string) {
     return this.db.select({
       sessionId: schema.platformSessions.id,
+      tokenHash: schema.platformSessions.tokenHash,
       lastSeenAt: schema.platformSessions.lastSeenAt,
       userId: schema.platformUsers.id,
       email: schema.platformUsers.email,
@@ -606,7 +630,10 @@ export class PlatformAuthService {
       .from(schema.platformSessions)
       .innerJoin(schema.platformUsers, eq(schema.platformSessions.userId, schema.platformUsers.id))
       .where(and(
-        eq(schema.platformSessions.tokenHash, tokenHash),
+        or(
+          eq(schema.platformSessions.tokenHash, tokenHash),
+          eq(schema.platformSessions.tokenHash, legacyTokenHash),
+        ),
         gt(schema.platformSessions.expiresAt, new Date()),
       ))
       .get();
@@ -664,12 +691,17 @@ export class PlatformAuthService {
   }
 
   issueLoginHandoff(sessionToken: string, targetOrigin: string): string {
+    const tokenHash = this.hashSessionToken(sessionToken);
+    const legacyTokenHash = this.hashToken(sessionToken);
     const session = this.db.select({
       userId: schema.platformSessions.userId,
     })
       .from(schema.platformSessions)
       .where(and(
-        eq(schema.platformSessions.tokenHash, this.hashToken(sessionToken)),
+        or(
+          eq(schema.platformSessions.tokenHash, tokenHash),
+          eq(schema.platformSessions.tokenHash, legacyTokenHash),
+        ),
         gt(schema.platformSessions.expiresAt, new Date()),
       ))
       .get();
@@ -944,7 +976,10 @@ export class PlatformAuthService {
     const session = this.getSessionFromRequest(request);
     if (!session) return;
     this.db.delete(schema.platformSessions)
-      .where(eq(schema.platformSessions.tokenHash, session.tokenHash))
+      .where(or(
+        eq(schema.platformSessions.tokenHash, session.tokenHash),
+        eq(schema.platformSessions.tokenHash, session.legacyTokenHash),
+      ))
       .run();
   }
 
@@ -961,12 +996,17 @@ export class PlatformAuthService {
     reply.header('set-cookie', buildClearedCookie(this.config.sessionCookieName, this.shouldUseSecureCookies()));
   }
 
-  private getSessionFromRequest(request: FastifyRequest): { token: string; tokenHash: string } | null {
+  private getSessionFromRequest(request: FastifyRequest): {
+    token: string;
+    tokenHash: string;
+    legacyTokenHash: string;
+  } | null {
     const bearerToken = parseBearerToken(request.headers.authorization);
     if (bearerToken) {
       return {
         token: bearerToken,
-        tokenHash: this.hashToken(bearerToken),
+        tokenHash: this.hashSessionToken(bearerToken),
+        legacyTokenHash: this.hashToken(bearerToken),
       };
     }
 
@@ -975,22 +1015,22 @@ export class PlatformAuthService {
     if (token) {
       return {
         token,
-        tokenHash: this.hashToken(token),
+        tokenHash: this.hashSessionToken(token),
+        legacyTokenHash: this.hashToken(token),
       };
     }
 
-    // WebSocket upgrade requests cannot set an Authorization header from the
-    // browser/webview, and the desktop shell has no runtime cookie (its session
-    // token lives in localStorage). The chat socket therefore passes the token
-    // via an `access_token` query param. Restricted to WS upgrades so the HTTP
-    // auth surface is unchanged; validation is identical to a Bearer token.
+    // Browser/WebView WebSocket APIs cannot set Authorization. The desktop
+    // shell therefore uses a private Sec-WebSocket-Protocol entry. Credentials
+    // must never ride in URLs, where routine access logging can expose them.
     const isWebSocketUpgrade = String(request.headers.upgrade ?? '').toLowerCase() === 'websocket';
     if (isWebSocketUpgrade) {
-      const queryToken = this.getAccessTokenFromQuery(request);
-      if (queryToken) {
+      const protocolToken = this.getAccessTokenFromWebSocketProtocol(request);
+      if (protocolToken) {
         return {
-          token: queryToken,
-          tokenHash: this.hashToken(queryToken),
+          token: protocolToken,
+          tokenHash: this.hashSessionToken(protocolToken),
+          legacyTokenHash: this.hashToken(protocolToken),
         };
       }
     }
@@ -998,19 +1038,8 @@ export class PlatformAuthService {
     return null;
   }
 
-  private getAccessTokenFromQuery(request: FastifyRequest): string | null {
-    const query = (request as FastifyRequest & { query?: unknown }).query;
-    if (query && typeof query === 'object' && !Array.isArray(query)) {
-      const value = (query as Record<string, unknown>).access_token;
-      if (typeof value === 'string' && value.trim()) return value.trim();
-      if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim()) return value[0].trim();
-    }
-
-    const requestUrl = typeof request.url === 'string' ? request.url : '';
-    const queryStart = requestUrl.indexOf('?');
-    if (queryStart === -1) return null;
-    const fromUrl = new URLSearchParams(requestUrl.slice(queryStart + 1)).get('access_token');
-    return fromUrl?.trim() || null;
+  private getAccessTokenFromWebSocketProtocol(request: FastifyRequest): string | null {
+    return parseWebSocketProtocolSessionToken(request.headers['sec-websocket-protocol']);
   }
 
   private getCompanionMetadataFromRequest(request: FastifyRequest): CompanionClientMetadata | null {
@@ -1336,7 +1365,7 @@ export class PlatformAuthService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.config.sessionTtlHours * 60 * 60 * 1000);
     const token = encodeBase64Url(randomBytes(48));
-    const tokenHash = this.hashToken(token);
+    const tokenHash = this.hashSessionToken(token);
 
     this.db.insert(schema.platformSessions)
       .values({
@@ -1388,6 +1417,14 @@ export class PlatformAuthService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(`${this.config.sessionSecret}:${token}`).digest('hex');
+  }
+
+  private hashSessionToken(token: string): string {
+    // Session tokens contain 384 random bits, so a deterministic SHA-256 verifier
+    // is preimage-safe without a configuration-dependent pepper. Keeping the
+    // verifier stable is what lets a local desktop session survive app/runtime
+    // updates that rotate unrelated OAuth/state secrets.
+    return createHash('sha256').update(`vai-session-v2:${token}`).digest('hex');
   }
 
   private sanitizeReturnTo(returnTo: string | undefined, request: FastifyRequest): string {

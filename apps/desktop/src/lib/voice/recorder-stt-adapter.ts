@@ -8,6 +8,7 @@ import { apiFetch } from '../api.js';
 import { buildMicConstraints } from './audio-constraints.js';
 import { prepareTranscribePayload } from './audio-pcm.js';
 import { builtinModelForQuality, loadSttQuality, type SttQuality } from './stt-quality.js';
+import { loadVocabulary } from './stt-vocabulary.js';
 
 /**
  * Recorder STT adapter — the reliable engine for the desktop app.
@@ -41,6 +42,8 @@ const PARTIAL_MIN_BYTES = 2_400;
 /** Partials always use the FAST model (base.en ≈ 0.9s) regardless of the final quality —
  *  live text must be snappy; the accurate final still runs at the chosen quality on release. */
 const PARTIAL_QUALITY = 'fast' as const;
+/** Bound each encoded blob and transcribe completed speech while a long hold continues. */
+const LONG_HOLD_SEGMENT_MS = 45_000;
 
 function pickMimeType(): string {
   const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
@@ -79,8 +82,11 @@ async function transcribe(
   mimeType: string,
   lang?: string,
   quality: SttQuality = loadSttQuality(),
+  externalSignal?: AbortSignal,
 ): Promise<string> {
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
   const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
   const language = lang ?? 'en-US';
   try {
@@ -95,6 +101,9 @@ async function transcribe(
         quality,
         model: builtinModelForQuality(quality, language),
         preferOllama: quality === 'best',
+        // Decode-time biasing for prompt-capable engines (cloud/Ollama); the
+        // builtin path ignores it and keeps cleanup-layer vocab restoration.
+        vocabulary: loadVocabulary(),
       }),
       signal: controller.signal,
     });
@@ -109,7 +118,13 @@ async function transcribe(
     return (parsed.text ?? '').trim();
   } finally {
     window.clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
   }
+}
+
+/** Join independently decoded long-hold segments without inventing punctuation. */
+export function mergeTranscriptionSegments(segments: readonly string[]): string {
+  return segments.map((segment) => segment.trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 
 export interface ServerSttStatus {
@@ -253,26 +268,40 @@ export class RecorderSttAdapter implements SttAdapter {
   }
 
   async start(options?: SttStartOptions): Promise<SttSession> {
-    const stream = await acquireStream(options?.deviceId);
+    let stream = await acquireStream(options?.deviceId);
     const mimeType = pickMimeType();
-    const chunks: Blob[] = [];
-    const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128_000 });
+    const finalQuality = options?.quality ?? loadSttQuality();
+    const captureCtx = new AudioContext();
+    const captureDestination = captureCtx.createMediaStreamDestination();
+    let captureSource = captureCtx.createMediaStreamSource(stream);
+    captureSource.connect(captureDestination);
+    await captureCtx.resume().catch(() => undefined);
+    const graphActive = captureCtx.state === 'running';
+    const recorderStream = graphActive ? captureDestination.stream : stream;
+    type CaptureSegment = { recorder: MediaRecorder; chunks: Blob[] };
+    const createCaptureSegment = (): CaptureSegment => {
+      const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(recorderStream, { mimeType, audioBitsPerSecond: 128_000 });
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+      return { recorder, chunks };
+    };
+    let activeCapture: CaptureSegment | null = createCaptureSegment();
     let aborted = false;
+    let finalizing = false;
 
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    recorder.start(250); // timesliced so a crash mid-hold still has audio
+    activeCapture.recorder.start(250); // timesliced so a crash mid-hold still has audio
 
     // Live loudness meter: drive a bouncing UI element while the user speaks. Purely
     // cosmetic — it reads the SAME stream, never touches the recorded audio, and any
     // failure here must not affect capture.
     let levelRaf = 0;
-    let levelCtx: AudioContext | null = null;
+    let levelAnalyser: AnalyserNode | null = null;
     if (options?.onLevel) {
       try {
-        levelCtx = new AudioContext();
-        const analyser = levelCtx.createAnalyser();
+        const analyser = captureCtx.createAnalyser();
+        levelAnalyser = analyser;
         analyser.fftSize = 256;
-        levelCtx.createMediaStreamSource(stream).connect(analyser);
+        captureSource.connect(analyser);
         const buf = new Uint8Array(analyser.frequencyBinCount);
         let lastEmit = 0;
         const loop = () => {
@@ -290,11 +319,82 @@ export class RecorderSttAdapter implements SttAdapter {
       } catch { /* metering is cosmetic — ignore */ }
     }
 
+    // MediaRecorder consumes a stable AudioContext destination, allowing the
+    // physical microphone to be replaced mid-hold without losing earlier chunks.
+    let captureReleased = false;
+    let deviceSwitchInFlight = false;
+    let desiredDeviceId = options?.deviceId;
+    const switchInput = async (nextDeviceId?: string) => {
+      if (captureReleased || deviceSwitchInFlight) return;
+      if (!graphActive) {
+        options?.onError?.({
+          code: 'unknown',
+          message: 'Microphone changed during this hold. Release and hold again to use the new device.',
+        });
+        return;
+      }
+      deviceSwitchInFlight = true;
+      try {
+        const nextStream = await acquireStream(nextDeviceId);
+        if (captureReleased) {
+          nextStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const nextSource = captureCtx.createMediaStreamSource(nextStream);
+        nextSource.connect(captureDestination);
+        if (levelAnalyser) nextSource.connect(levelAnalyser);
+        for (const track of stream.getTracks()) track.onended = null;
+        captureSource.disconnect();
+        stream.getTracks().forEach((track) => track.stop());
+        stream = nextStream;
+        captureSource = nextSource;
+        armTrackEnd();
+      } catch (error) {
+        options?.onError?.({
+          code: 'unknown',
+          message: `Microphone changed, but Vai could not reconnect: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      } finally {
+        deviceSwitchInFlight = false;
+        // Coalesce rapid picker/devicechange events. If another device was chosen
+        // while getUserMedia was still opening, immediately perform the newest
+        // request instead of silently leaving the intermediate microphone active.
+        if (!captureReleased && desiredDeviceId !== nextDeviceId) {
+          void switchInput(desiredDeviceId);
+        }
+      }
+    };
+    const armTrackEnd = () => {
+      for (const track of stream.getAudioTracks()) {
+        track.onended = () => { void switchInput(desiredDeviceId); };
+      }
+    };
+    const onSelectedDeviceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      desiredDeviceId = typeof detail === 'string' && detail ? detail : undefined;
+      void switchInput(desiredDeviceId);
+    };
+    const onSystemDeviceChanged = () => {
+      if (stream.getAudioTracks().some((track) => track.readyState === 'ended')) {
+        void switchInput(desiredDeviceId);
+      }
+    };
+    armTrackEnd();
+    window.addEventListener('vai:voice-device-changed', onSelectedDeviceChanged);
+    navigator.mediaDevices.addEventListener?.('devicechange', onSystemDeviceChanged);
+
     const release = () => {
+      captureReleased = true;
+      window.removeEventListener('vai:voice-device-changed', onSelectedDeviceChanged);
+      navigator.mediaDevices.removeEventListener?.('devicechange', onSystemDeviceChanged);
       if (levelRaf) cancelAnimationFrame(levelRaf);
-      void levelCtx?.close().catch(() => undefined);
-      levelCtx = null;
+      levelAnalyser?.disconnect();
+      levelAnalyser = null;
+      captureSource.disconnect();
+      for (const track of stream.getTracks()) track.onended = null;
       stream.getTracks().forEach((t) => t.stop());
+      captureDestination.stream.getTracks().forEach((t) => t.stop());
+      void captureCtx.close().catch(() => undefined);
     };
 
     // Live caption: periodically transcribe everything recorded so far, so the bubble
@@ -302,69 +402,121 @@ export class RecorderSttAdapter implements SttAdapter {
     // effort and skippable — a slow/failed partial must never affect the final result.
     let partialTimer = 0;
     let partialKickoff = 0;
+    let partialAbort: AbortController | null = null;
+    let partialTask: Promise<void> = Promise.resolve();
+    const segmentTexts: string[] = [];
+    let segmentTranscriptionPending = 0;
     if (PARTIAL_INTERVAL_MS > 0 && options?.onPartial) {
       let partialInFlight = false;
       let lastPartialText = '';
       const runPartial = () => {
-        if (partialInFlight || aborted || chunks.length === 0) return;
-        const snapshot = new Blob(chunks, { type: mimeType });
+        const capture = activeCapture;
+        if (partialInFlight || segmentTranscriptionPending > 0 || aborted || !capture || capture.chunks.length === 0) return;
+        const snapshot = new Blob(capture.chunks, { type: mimeType });
         if (snapshot.size < PARTIAL_MIN_BYTES) return;
         partialInFlight = true;
+        partialAbort = new AbortController();
         // Fast model on localhost → cheap enough to run repeatedly while holding.
-        void transcribe(snapshot, mimeType, options?.lang, PARTIAL_QUALITY)
+        partialTask = transcribe(snapshot, mimeType, options?.lang, PARTIAL_QUALITY, partialAbort.signal)
           .then((text) => {
             const trimmed = text.trim();
-            if (!aborted && trimmed && trimmed !== lastPartialText) {
-              lastPartialText = trimmed;
-              options.onPartial?.({ transcript: trimmed, isFinal: false });
+            const combined = mergeTranscriptionSegments([...segmentTexts, trimmed]);
+            if (!aborted && combined && combined !== lastPartialText) {
+              lastPartialText = combined;
+              options.onPartial?.({ transcript: combined, isFinal: false });
             }
           })
           .catch(() => { /* interim is best-effort — the final transcript is authoritative */ })
-          .finally(() => { partialInFlight = false; });
+          .finally(() => { partialInFlight = false; partialAbort = null; });
       };
       partialTimer = window.setInterval(runPartial, PARTIAL_INTERVAL_MS);
       partialKickoff = window.setTimeout(runPartial, PARTIAL_KICKOFF_MS);
     }
 
-    const stopRecorder = (): Promise<void> => new Promise((resolve) => {
-      if (recorder.state === 'inactive') { resolve(); return; }
+    const stopRecorder = (capture: CaptureSegment): Promise<void> => new Promise((resolve) => {
+      if (capture.recorder.state === 'inactive') { resolve(); return; }
       const done = () => resolve();
-      recorder.onstop = done;
+      capture.recorder.onstop = done;
       // MediaRecorder.stop() can miss its onstop in edge cases — never hang the UI on it.
-      window.setTimeout(done, 1_500);
-      try { recorder.stop(); } catch { resolve(); }
+      window.setTimeout(done, 250);
+      try { capture.recorder.stop(); } catch { resolve(); }
     });
+
+    let segmentError: SttError | null = null;
+    let transcriptionQueue = Promise.resolve();
+    const asSttError = (error: unknown): SttError => (
+      error && typeof error === 'object' && 'code' in error
+        ? error as SttError
+        : { code: 'network', message: error instanceof Error ? error.message : String(error) }
+    );
+    const enqueueSegment = (capture: CaptureSegment) => {
+      const blob = new Blob(capture.chunks, { type: mimeType });
+      if (blob.size < 1_000) return;
+      segmentTranscriptionPending += 1;
+      transcriptionQueue = transcriptionQueue.then(async () => {
+        if (aborted) return;
+        try {
+          const text = await transcribe(blob, mimeType, options?.lang, finalQuality);
+          if (text.trim()) segmentTexts.push(text.trim());
+        } catch (error) {
+          const sttError = asSttError(error);
+          if (sttError.code !== 'no-speech') segmentError ??= sttError;
+        }
+      }).finally(() => { segmentTranscriptionPending -= 1; });
+    };
+
+    // Keep long holds bounded. Completed segments transcribe serially while the
+    // microphone continues, respecting the one-heavy-GPU-task rule.
+    let rotationQueue = Promise.resolve();
+    const rotateCapture = () => {
+      rotationQueue = rotationQueue.then(async () => {
+        if (finalizing || aborted || !activeCapture) return;
+        partialAbort?.abort();
+        await partialTask;
+        const finished = activeCapture;
+        activeCapture = null;
+        await stopRecorder(finished);
+        enqueueSegment(finished);
+        if (!finalizing && !aborted) {
+          activeCapture = createCaptureSegment();
+          activeCapture.recorder.start(250);
+        }
+      });
+    };
+    const rotationTimer = window.setInterval(rotateCapture, LONG_HOLD_SEGMENT_MS);
 
     return {
       stop: async (): Promise<string> => {
+        finalizing = true;
+        window.clearInterval(rotationTimer);
         if (partialTimer) window.clearInterval(partialTimer);
         if (partialKickoff) window.clearTimeout(partialKickoff);
-        await stopRecorder();
+        partialAbort?.abort();
+        await partialTask;
+        await rotationQueue;
+        if (activeCapture) {
+          const finished = activeCapture;
+          activeCapture = null;
+          await stopRecorder(finished);
+          enqueueSegment(finished);
+        }
         release();
         if (aborted) return '';
-        const blob = new Blob(chunks, { type: mimeType });
-        // Sub-250ms of audio is a tap, not speech — skip the round-trip.
-        if (blob.size < 1_000) {
-          options?.onError?.({ code: 'no-speech', message: 'No speech was captured.' });
-          return '';
-        }
-        try {
-          const text = await transcribe(blob, mimeType, options?.lang);
-          if (!text) options?.onError?.({ code: 'no-speech', message: 'Nothing was transcribed.' });
-          return text;
-        } catch (e) {
-          const err = (e && typeof e === 'object' && 'code' in e)
-            ? e as SttError
-            : { code: 'network', message: e instanceof Error ? e.message : String(e) } satisfies SttError;
-          options?.onError?.(err);
-          return '';
-        }
+        await transcriptionQueue;
+        const text = mergeTranscriptionSegments(segmentTexts);
+        if (text) return text;
+        options?.onError?.(segmentError ?? { code: 'no-speech', message: 'No speech was captured.' });
+        return '';
       },
       abort: () => {
         aborted = true;
+        finalizing = true;
+        window.clearInterval(rotationTimer);
         if (partialTimer) window.clearInterval(partialTimer);
         if (partialKickoff) window.clearTimeout(partialKickoff);
-        try { recorder.stop(); } catch { /* already stopped */ }
+        partialAbort?.abort();
+        try { activeCapture?.recorder.stop(); } catch { /* already stopped */ }
+        activeCapture = null;
         release();
       },
     };

@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { SkillManifest, LoadedSkill, SkillTool, SkillPermission, SkillTrust } from './types.js';
+import { wrapUntrustedContent } from '../security/untrusted-content.js';
 
 // ── SKILL.md frontmatter parser ──────────────────────────────────
 
@@ -331,7 +332,9 @@ export class SkillRegistry {
     const skill = this.skills.get(skillName);
     if (!skill) return '';
     const deps = this.resolveDeps(skillName);
-    const parts = deps.map(s => `## Skill: ${s.manifest.name}\n${s.instructions}`);
+    const parts = deps.map((s) => s.manifest.trust === 'builtin'
+      ? `## Skill: ${s.manifest.name}\n${s.instructions}`
+      : `## Skill candidate: ${s.manifest.name}\n${wrapUntrustedContent('skill', s.instructions, { source: s.path })}`);
     return parts.join('\n\n---\n\n');
   }
 

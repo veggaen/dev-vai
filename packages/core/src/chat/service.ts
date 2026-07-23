@@ -6,9 +6,12 @@ import type {
   ChatPromptRewriteProfile,
   ChatPromptRewriteResponseDepth,
 } from '../config/types.js';
-import { conversations, messages, images } from '../db/schema.js';
+import { conversations, messages, images, councilWorkArtifacts } from '../db/schema.js';
 import type { ModelRegistry, ModelAdapter, ChatChunk, Message, TokenUsage, TurnThinking, TurnRoutePlan, AuditMeta, AuditOutcomeKind } from '../models/adapter.js';
 import { SkillRouter } from '../models/skill-router.js';
+import { UNTRUSTED_CONTENT_POLICY, wrapUntrustedContent } from '../security/untrusted-content.js';
+import { budgetContext } from '../context/budget.js';
+import { LIMITS } from '@vai/constants';
 import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 import {
   buildChatTurnQualitySystemHint,
@@ -98,8 +101,7 @@ import {
   type ProcessLogEntry,
 } from './council-process-log.js';
 import { buildCouncilAuditMeta, withCouncilAuditVisibility } from './council-audit-meta.js';
-import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
-import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
+import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace, type ChatProgressStep } from './progress-trace.js';
 import { buildSearchProcessLog } from './search-process-log.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
@@ -118,10 +120,17 @@ import { jobsFromConsensus, type SelfImproveQueue } from './self-improve-queue-p
 import { extractActiveTopicBrief, hasTopicOverlap } from './active-topic-brief.js';
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
 import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
+import { unwrapNaturalLanguageResponseEnvelope } from './natural-response.js';
+import {
+  answerMatchesVenuePracticalDetail,
+  detectVenuePracticalDetail,
+} from '../venue-practical-detail.js';
 import {
   buildSourcesChunkFromSearch,
   buildEvidenceContextSystemHint,
+  buildVenuePracticalEvidenceLimitation,
   fetchTurnWebEvidence,
+  shouldShipGroundedSearchConclusion,
   shouldAttemptWebConclusion,
 } from './web-conclude-turn.js';
 import {
@@ -149,6 +158,7 @@ import {
   validateGeneratedApp,
   type CouncilCodegenMember,
   type CouncilEditContext,
+  type CouncilWithheldProposal,
 } from '../models/builder/council-codegen/index.js';
 import { routeBuilderRequest } from '../models/builder/builder-request-router.js';
 import { calculateCost } from '../usage/service.js';
@@ -158,6 +168,15 @@ import { tryEmitBoundaryResponse } from './boundary-response.js';
 import { reviewTurnSecurity } from './security-review.js';
 import { reduceConversationContract, buildContractSystemPrelude } from './conversation-contract.js';
 import { tryEmitConversationReasoning } from './conversation-reasoning.js';
+import {
+  buildDialogueSystemPrelude,
+  tryHandleDialogueTurn,
+  type DialogueImprovementCandidate,
+} from './dialogue-state.js';
+import {
+  tryEmitVaiSelfAssessment,
+  type VaiOperationalEvidenceSnapshot,
+} from './vai-self-assessment.js';
 import { normalizeInputForUnderstanding } from '../input-normalization.js';
 import { tryEmitSingleClarifyingQuestion } from './single-clarifying-question.js';
 import {
@@ -175,12 +194,16 @@ import {
 import { tryBusinessOpportunityDirection } from './business-opportunity-direction.js';
 import { composeIntentDirective, belowFloorReason } from './intent-directive.js';
 import { checkMultiIntentCoverage, describeMissingParts } from './multi-intent-coverage.js';
+import { evaluateCouncilRedraftIntegrity } from './council-redraft-integrity.js';
 import { detectMultiIntent } from './multi-intent.js';
 import { shouldPeerReviewCode } from './code-review-policy.js';
 import {
   resolveContextualFollowUp,
   rewriteBusinessContactLookupFollowUp,
 } from './contextual-resolver.js';
+import { detectTrickQuestion } from '../trick-questions/index.js';
+import { tryReliableJobDesign } from './reliable-job-design.js';
+import { tryBoundedReasoning } from '../reasoning/bounded-reasoning.js';
 
 /**
  * A {@link Resolution} carrying the two service-specific fields the shared
@@ -192,6 +215,10 @@ import {
 interface ServiceResolution extends Resolution {
   readonly strategy: string;
   readonly preChunks?: readonly ChatChunk[];
+  /** Vai-owned relational turns do not need a model council to validate who said what. */
+  readonly bypassCouncil?: boolean;
+  /** Evidence-derived candidate for the existing guarded self-improvement queue. */
+  readonly selfImprovement?: DialogueImprovementCandidate;
 }
 
 /**
@@ -264,6 +291,28 @@ export interface ResponseReviewer {
   readonly review: (input: ResponseReviewInput) => Promise<ResponseReviewResult | null>;
 }
 
+export interface CouncilWorkArtifactSummary {
+  readonly id: string;
+  readonly projectName: string;
+  readonly brief: string;
+  readonly status: 'pending' | 'applied' | 'superseded';
+  readonly filePaths: readonly string[];
+  readonly validation: {
+    readonly ok: boolean;
+    readonly errors: readonly string[];
+    readonly warnings: readonly string[];
+  };
+  readonly reviews: readonly {
+    readonly memberId: string;
+    readonly verdict: 'ship' | 'needs-work';
+    readonly mustFixCount: number;
+  }[];
+  readonly repairsUsed: number;
+  readonly memberIds: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 /**
  * Per-capability toggles for the intent-aware routing improvements. Each field
  * defaults to `true` (the improvement is on); setting one `false` restores the
@@ -300,6 +349,12 @@ function resolveRoutingConfig(config: RoutingConfig | undefined): Required<Routi
 
 export interface ChatServiceOptions {
   readonly promptRewrite?: Partial<ChatPromptRewriteConfig>;
+  /**
+   * Read-only, Vai-owned project evidence for broad self-assessment turns.
+   * The provider must stay bounded and synchronous; failures are ignored so
+   * operational inspection can never make chat unavailable.
+   */
+  readonly selfAssessmentEvidence?: () => VaiOperationalEvidenceSnapshot;
   /** Optional knowledge retrieval function for enriching external model prompts */
   readonly retrieveKnowledge?: (query: string, topK?: number) => Array<{ text: string; source: string; score: number }>;
   /**
@@ -446,6 +501,7 @@ function isChatServiceOptions(value: unknown): value is ChatServiceOptions {
     && typeof value === 'object'
     && (
       'promptRewrite' in value
+      || 'selfAssessmentEvidence' in value
       || 'retrieveKnowledge' in value
       || 'vaiFallbackChain' in value
       || 'extraDeclineMarkers' in value
@@ -978,12 +1034,71 @@ function shouldKeepDeterministicDespiteQualityGate(strategy: string): boolean {
     // authoritative by construction — keep it instead of escalating to the engine, which
     // produced irrelevant "engine, simpler"/"best next task" templates for these turns.
     || strategy.startsWith('chat-vai-identity')
-    || strategy.startsWith('chat-format-strict');
+    || strategy.startsWith('dialogue-state:')
+    || strategy.startsWith('chat-format-strict')
+    || strategy.startsWith('trick-question:')
+    || strategy === 'reliable-job-design'
+    || strategy.startsWith('bounded-reasoning:');
 }
 
 function failsAnswerQualityGate(prompt: string, response: string, strategy?: string): boolean {
   if (!response.trim()) return true;
   return evaluateChatAnswerQuality({ prompt, response, strategy }).verdict === 'fail';
+}
+
+/** Prefer code-specialized local seats for implementation while preserving reviewer order. */
+export function prioritizeBuilderCouncilMemberIds(ids: readonly string[]): string[] {
+  return ids
+    .map((id, index) => ({ id, index, coder: /(?:^|[-/:])coder(?:[-/:]|$)/i.test(id) }))
+    .sort((a, b) => Number(b.coder) - Number(a.coder) || a.index - b.index)
+    .map(({ id }) => id);
+}
+
+export function resolveFallbackOwnershipLabel(input: {
+  readonly fallbackLabel: string;
+  readonly councilOwnsResult: boolean;
+  readonly councilGenerationStarted: boolean;
+  readonly primaryFlip: boolean;
+  readonly councilEscalated: boolean;
+}): string | null {
+  if (input.councilOwnsResult) return null;
+  if (input.councilGenerationStarted) {
+    return `Council could not complete the build — handing to ${input.fallbackLabel}`;
+  }
+  if (input.primaryFlip) return `Handing this to ${input.fallbackLabel} — my generative arm`;
+  if (input.councilEscalated) return `Council escalated — handing to ${input.fallbackLabel}`;
+  return `Not in my memory yet — asking ${input.fallbackLabel}`;
+}
+
+function normalizeProposalBrief(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Resume only when the user explicitly continues the withheld work (or repeats it). */
+export function shouldResumeCouncilProposal(brief: string, proposal: CouncilWithheldProposal): boolean {
+  const next = normalizeProposalBrief(brief);
+  const previous = normalizeProposalBrief(proposal.brief);
+  if (!next || !previous) return false;
+  if (next === previous) return true;
+  return /\b(?:retry|resume|continue|finish|repair|fix|address)\b/.test(next)
+    && /\b(?:withheld|remaining|previous|proposal|attempt|edit|issue|issues|failure|failed)\b/.test(next);
+}
+
+/** Active-project implementation requests outrank incidental image words. */
+export function shouldUseImageGenerationForTurn(input: {
+  readonly wantsImage: boolean;
+  readonly explicitImageMode: boolean;
+  readonly hasActiveSandbox: boolean;
+  readonly content: string;
+}): boolean {
+  if (!input.wantsImage) return false;
+  if (input.explicitImageMode) return true;
+  return !isActiveProjectExecutionTurn(input.hasActiveSandbox, input.content);
+}
+
+export function isActiveProjectExecutionTurn(hasActiveSandbox: boolean, content: string): boolean {
+  return hasActiveSandbox
+    && (isExplicitBuildExecutionRequest(content) || classifyAgentBuildIntent(content) === 'ambiguous');
 }
 
 export class ChatService {
@@ -1121,6 +1236,7 @@ export class ChatService {
   private readonly imageProducer?: ChatServiceOptions['imageProducer'];
   private readonly imageIntentGateAdapter?: ChatServiceOptions['imageIntentGateAdapter'];
   private readonly workspacePort?: WorkspaceFilePort;
+  private readonly selfAssessmentEvidence?: ChatServiceOptions['selfAssessmentEvidence'];
 
   constructor(
     private db: VaiDatabase,
@@ -1132,6 +1248,7 @@ export class ChatService {
     this.controller = isChatServiceOptions(controllerOrOptions) ? undefined : controllerOrOptions;
     this.promptRewriteConfig = resolveChatPromptRewriteConfig(resolvedOptions?.promptRewrite);
     this.retrieveKnowledge = resolvedOptions?.retrieveKnowledge;
+    this.selfAssessmentEvidence = resolvedOptions?.selfAssessmentEvidence;
     this.vaiFallbackChain = resolvedOptions?.vaiFallbackChain ?? [];
     this.extraDeclineMarkers = resolvedOptions?.extraDeclineMarkers ?? [];
     this.verificationConfig = {
@@ -1176,7 +1293,7 @@ export class ChatService {
     const allowed = allow
       ? orderedIds.filter((id) => allow.has(id) || allow.has(id.split('#')[0]!))
       : orderedIds;
-    const effectiveIds = allowed.length > 0 ? allowed : orderedIds;
+    const effectiveIds = prioritizeBuilderCouncilMemberIds(allowed.length > 0 ? allowed : orderedIds);
     const members: CouncilCodegenMember[] = [];
     const seen = new Set<string>();
     for (const id of effectiveIds) {
@@ -1751,6 +1868,28 @@ export class ChatService {
   }
 
   /**
+   * Vai can nominate its own improvement after inspecting a completed exchange.
+   * The existing queue remains the safety boundary: nomination never edits code
+   * or bypasses the feature-review, test, and verification gates.
+   */
+  private triggerVaiOwnedSelfImprovement(
+    prompt: string,
+    candidate: DialogueImprovementCandidate,
+  ): void {
+    if (!this.selfImproveQueue) return;
+    try {
+      this.selfImproveQueue.enqueue({
+        ...candidate,
+        prompt,
+        intent: classifyQuestionIntent(prompt),
+        memberId: 'vai:v0-dialogue-reflection',
+      });
+    } catch {
+      // Advisory only. A queue problem must never break the conversation.
+    }
+  }
+
+  /**
    * Optional fact cross-check: when the council cleared a draft that carries a checkable
    * claim (a price, count, date, named entity), run ONE web search and fold the outcome into
    * the consensus — a confirmation strongly boosts agreement (a verified "pass"), a
@@ -1962,7 +2101,11 @@ export class ChatService {
         .slice(0, 3)
         .map((source, index) => {
           const body = String(source.snippet ?? '').trim().slice(0, 2_000);
-          return `[${index + 1}] ${source.title ?? source.url}\nURL: ${source.url}\n${body}`;
+          return wrapUntrustedContent(
+            'web-content',
+            `[${index + 1}] ${source.title ?? source.url}\nURL: ${source.url}\n${body}`,
+            { source: source.url },
+          );
         })
         .join('\n\n'),
     ].join('\n\n');
@@ -2174,6 +2317,27 @@ export class ChatService {
       };
     }
 
+    const redraftIntegrity = evaluateCouncilRedraftIntegrity({
+      prompt: draft.prompt,
+      originalDraft: draft.draftText,
+      candidateDraft: cleaned,
+    });
+    if (!redraftIntegrity.accepted) {
+      yield {
+        stage: stages.redraft,
+        label: 'Vai kept the original draft (revision failed integrity)',
+        detail: redraftIntegrity.detail,
+        status: 'done',
+        processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
+      };
+      return {
+        council: first.thinking,
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta('O6', draft, first.thinking, false),
+      };
+    }
+
     yield {
       stage: stages.redraft,
       label: 'Vai redrafted from council feedback',
@@ -2312,6 +2476,79 @@ export class ChatService {
     ].join(' ');
   }
 
+  private getPendingCouncilWorkArtifact(conversationId: string, sandboxProjectId: string | null): { id: string; proposal: CouncilWithheldProposal } | null {
+    const row = this.db.select()
+      .from(councilWorkArtifacts)
+      .where(and(
+        eq(councilWorkArtifacts.conversationId, conversationId),
+        eq(councilWorkArtifacts.status, 'pending'),
+      ))
+      .orderBy(desc(councilWorkArtifacts.updatedAt))
+      .get();
+    if (!row || row.sandboxProjectId !== sandboxProjectId) return null;
+    try {
+      const files = JSON.parse(row.files);
+      const validation = JSON.parse(row.validation);
+      const reviews = JSON.parse(row.reviews);
+      const memberIds = JSON.parse(row.memberIds);
+      if (!Array.isArray(files) || !Array.isArray(reviews) || !Array.isArray(memberIds) || !validation || typeof validation !== 'object') return null;
+      return {
+        id: row.id,
+        proposal: {
+          schemaVersion: 1,
+          projectName: row.projectName,
+          brief: row.brief,
+          files,
+          validation,
+          reviews,
+          repairsUsed: row.repairsUsed,
+          memberIds,
+        } as CouncilWithheldProposal,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private persistCouncilWorkArtifact(
+    conversationId: string,
+    sandboxProjectId: string | null,
+    proposal: CouncilWithheldProposal,
+  ): string {
+    const now = new Date();
+    this.db.update(councilWorkArtifacts)
+      .set({ status: 'superseded', updatedAt: now })
+      .where(and(
+        eq(councilWorkArtifacts.conversationId, conversationId),
+        eq(councilWorkArtifacts.status, 'pending'),
+      ))
+      .run();
+    const id = ulid();
+    this.db.insert(councilWorkArtifacts).values({
+      id,
+      conversationId,
+      sandboxProjectId,
+      projectName: proposal.projectName,
+      brief: proposal.brief,
+      files: JSON.stringify(proposal.files),
+      validation: JSON.stringify(proposal.validation),
+      reviews: JSON.stringify(proposal.reviews),
+      repairsUsed: proposal.repairsUsed,
+      memberIds: JSON.stringify(proposal.memberIds),
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+    return id;
+  }
+
+  private resolveCouncilWorkArtifact(id: string, status: 'applied' | 'superseded'): void {
+    this.db.update(councilWorkArtifacts)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(councilWorkArtifacts.id, id))
+      .run();
+  }
+
   createConversation(modelId: string, title?: string, mode: ConversationMode = DEFAULT_CONVERSATION_MODE, ownerUserId?: string | null): string {
     const id = ulid();
     const now = new Date();
@@ -2335,6 +2572,73 @@ export class ChatService {
       .from(conversations)
       .where(eq(conversations.id, conversationId))
       .get();
+  }
+
+  /**
+   * Model-neutral shared task summaries for humans, agents, and IDE surfaces.
+   * Raw candidate code stays in the artifact store; callers receive scope and
+   * evidence only, so inspecting work never floods the chat with file bodies.
+   */
+  listCouncilWorkArtifacts(conversationId: string, limit = 5): CouncilWorkArtifactSummary[] {
+    const rows = this.db.select()
+      .from(councilWorkArtifacts)
+      .where(eq(councilWorkArtifacts.conversationId, conversationId))
+      .orderBy(desc(councilWorkArtifacts.updatedAt))
+      .limit(Math.max(1, Math.min(limit, 20)))
+      .all();
+
+    return rows.flatMap((row) => {
+      try {
+        const files = JSON.parse(row.files) as Array<{ path?: unknown }>;
+        const validation = JSON.parse(row.validation) as {
+          ok?: unknown;
+          errors?: unknown;
+          softErrors?: unknown;
+          warnings?: unknown;
+        };
+        const reviews = JSON.parse(row.reviews) as Array<{
+          memberId?: unknown;
+          verdict?: unknown;
+          mustFix?: unknown;
+        }>;
+        const memberIds = JSON.parse(row.memberIds) as unknown;
+        if (!Array.isArray(files) || !Array.isArray(reviews) || !Array.isArray(memberIds)) return [];
+        const strings = (value: unknown): string[] => Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === 'string')
+          : [];
+        const errors = strings(validation.errors);
+        const warnings = [...strings(validation.softErrors), ...strings(validation.warnings)];
+        return [{
+          id: row.id,
+          projectName: row.projectName,
+          brief: row.brief.slice(0, 2_400),
+          status: row.status,
+          filePaths: [...new Set(files
+            .map((file) => typeof file.path === 'string' ? file.path : '')
+            .filter(Boolean))],
+          validation: {
+            ok: validation.ok === true,
+            errors,
+            warnings,
+          },
+          reviews: reviews.flatMap((review) => (
+            typeof review.memberId === 'string' && (review.verdict === 'ship' || review.verdict === 'needs-work')
+              ? [{
+                memberId: review.memberId,
+                verdict: review.verdict,
+                mustFixCount: strings(review.mustFix).length,
+              }]
+              : []
+          )),
+          repairsUsed: row.repairsUsed,
+          memberIds: strings(memberIds),
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        } satisfies CouncilWorkArtifactSummary];
+      } catch {
+        return [];
+      }
+    });
   }
 
   updateConversationMode(conversationId: string, mode: ConversationMode) {
@@ -2571,12 +2875,14 @@ export class ChatService {
       signal?: AbortSignal;
       processDepth?: 'quick' | 'balanced' | 'deep';
       councilModelIds?: readonly string[];
+      /** Retry of the previous turn: skip persisting the (already stored) user message and replace the last assistant answer. */
+      regenerate?: boolean;
     },
   ): AsyncGenerator<ChatChunk> {
     // Accumulated server-side using the api-types wire shape (what the persisted
     // blob and the client tree both speak); the adapter's readonly progress shape
     // is structurally identical, so the cast at the boundary is sound.
-    let trace: ApiChatProgressStep[] = [];
+    let trace: ChatProgressStep[] = [];
     let resolvedConversationId = conversationIdParam;
     for await (const chunk of this.sendMessageInner(
       conversationIdParam, content, image, systemPrompt, noLearn, promptRewriteOverrides, autoCreateOptions,
@@ -2586,7 +2892,7 @@ export class ChatService {
         resolvedConversationId = chunk.conversationId;
       }
       if (chunk.type === 'progress' && chunk.progress) {
-        trace = accumulateProgressStep(trace, chunk.progress as ApiChatProgressStep);
+        trace = accumulateProgressStep(trace, chunk.progress);
       }
       yield chunk;
     }
@@ -2637,6 +2943,8 @@ export class ChatService {
       processDepth?: 'quick' | 'balanced' | 'deep';
       /** Explicit per-turn council seats (composer roundtable picker). Empty/omitted → full roster. */
       councilModelIds?: readonly string[];
+      /** Retry of the previous turn: skip persisting the (already stored) user message and replace the last assistant answer. */
+      regenerate?: boolean;
     },
   ): AsyncGenerator<ChatChunk> {
     const turnSignal = autoCreateOptions?.signal;
@@ -2715,16 +3023,44 @@ export class ChatService {
     // watched on real turns before any capability is promoted to a live decider.
     let turnShadowScores: ShadowScore[] = [];
 
-    // Persist user message
-    const userMsgId = ulid();
-    this.db.insert(messages).values({
-      id: userMsgId,
-      conversationId,
-      role: 'user',
-      content: enrichedContent,
-      imageId,
-      createdAt: new Date(),
-    }).run();
+    // Persist user message. On a regenerate ("Retry") turn the user row already
+    // exists from the original send — inserting again would duplicate it in the
+    // durable history — so we drop the superseded assistant answer and reuse the
+    // existing user row instead. Guarded by a content match: if the latest user
+    // row does NOT equal the resent content (client/server divergence), fall
+    // back to a normal insert so nothing is silently lost.
+    const isRegenerateTurn = autoCreateOptions?.regenerate === true && (() => {
+      const lastUser = this.db
+        .select({ content: messages.content })
+        .from(messages)
+        .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'user')))
+        .orderBy(desc(messages.createdAt))
+        .limit(1)
+        .get();
+      return lastUser?.content === enrichedContent;
+    })();
+
+    if (isRegenerateTurn) {
+      const lastAssistant = this.db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+        .orderBy(desc(messages.createdAt))
+        .limit(1)
+        .get();
+      if (lastAssistant) {
+        this.db.delete(messages).where(eq(messages.id, lastAssistant.id)).run();
+      }
+    } else {
+      this.db.insert(messages).values({
+        id: ulid(),
+        conversationId,
+        role: 'user',
+        content: enrichedContent,
+        imageId,
+        createdAt: new Date(),
+      }).run();
+    }
 
     // Get conversation history — cap to last 40 messages to avoid runaway context.
     // Always keep at least the most recent pair so the model stays coherent.
@@ -3066,7 +3402,13 @@ export class ChatService {
         explicitImageMode: autoCreateOptions?.imageMode,
         mode: conv.mode,
       });
-      if (imgIntent.wantsImage && this.imageProducer?.canProduce) {
+      const useImageGeneration = shouldUseImageGenerationForTurn({
+        wantsImage: imgIntent.wantsImage,
+        explicitImageMode: Boolean(autoCreateOptions?.imageMode),
+        hasActiveSandbox: Boolean(conv.sandboxProjectId),
+        content,
+      });
+      if (useImageGeneration && this.imageProducer?.canProduce) {
         yield* this.runImageGenerationTurn({
           conversationId, content, subject: imgIntent.subject || content,
           startedAt: Date.now(), explicit: imgIntent.source === 'explicit',
@@ -3263,6 +3605,9 @@ export class ChatService {
         },
         resolve,
       });
+      // Parse once so a proven simulation cannot be reclassified as a request
+      // for live terminal evidence by a higher-fit route.
+      const boundedReasoningCandidate = tryBoundedReasoning(understoodContent, metaHistory);
       const handlers: TurnHandler<ServiceResolution>[] = [
         det('single-clarifying-question', 0.99, () => {
           const reply = tryEmitSingleClarifyingQuestion(understoodContent);
@@ -3271,12 +3616,73 @@ export class ChatService {
             : null;
         }, true, 'Top priority: if the ask is ambiguous, ask one focused question before answering.'),
         det('bridge-evidence-discipline', 0.98, () => {
+          if (boundedReasoningCandidate) return null;
           const reply = tryEmitPrivateLiveContextResponse(understoodContent)
             ?? tryEmitBridgeCapabilityAudit(understoodContent);
           return reply
             ? { text: reply, turnKind: 'analysis', confidence: 0.99, strategy: 'bridge-evidence-discipline' }
             : null;
         }, true, 'Live-context / capability questions — answer only from real captured evidence, never guess.'),
+        det('dialogue-state', 0.985, () => {
+          const result = tryHandleDialogueTurn({
+            content,
+            history: metaHistory,
+          });
+          if (!result) return null;
+          const reflectionProgress = result.kind === 'reflection'
+            ? [{
+                type: 'progress',
+                progress: {
+                  stage: 'dialogue-reflection',
+                  label: result.improvement
+                    ? 'Vai found a conversational improvement candidate'
+                    : 'Vai reviewed the completed exchange',
+                  detail: result.improvement?.missingCapability,
+                  status: 'done',
+                },
+              } as ChatChunk]
+            : undefined;
+          return {
+            text: result.reply,
+            turnKind: 'conversational',
+            confidence: result.confidence,
+            strategy: `dialogue-state:${result.kind}`,
+            bypassCouncil: true,
+            selfImprovement: result.improvement,
+            preChunks: reflectionProgress,
+          };
+        }, true, 'Vai-owned participant, attribution, shared-goal, and post-exchange reasoning.'),
+        det('vai-self-assessment', 0.984, () => {
+          let operationalEvidence: VaiOperationalEvidenceSnapshot | undefined;
+          try {
+            operationalEvidence = this.selfAssessmentEvidence?.();
+          } catch {
+            // Self-assessment remains available and honest when an operational
+            // source fails. The deterministic response names the missing packet.
+          }
+          const result = tryEmitVaiSelfAssessment({ content, history: metaHistory, operationalEvidence });
+          if (!result) return null;
+          return {
+            text: result.reply,
+            turnKind: 'analysis',
+            confidence: result.confidence,
+            strategy: `vai-self-assessment:${result.kind}`,
+            bypassCouncil: true,
+            preChunks: [{
+              type: 'progress',
+              progress: {
+                stage: 'vai-self-assessment',
+                label: operationalEvidence
+                  ? 'Vai inspected its operational evidence'
+                  : 'Vai bounded its self-assessment to attached evidence',
+                detail: operationalEvidence
+                  ? 'Runtime, repository, verification, and improvement records inspected; Council bypassed'
+                  : 'Council bypassed; operational evidence gaps named explicitly',
+                status: 'done',
+              },
+            } as ChatChunk],
+          };
+        }, true, 'Vai-owned, evidence-bounded diagnosis of its engineering bottlenecks.'),
         det('chat-vai-identity', 0.975, () => {
           // Grounded answers about Vai itself ("tell me about your engine", "what can you do",
           // "what is Vai", chat-vs-IDE mode). Seated ABOVE conversation-reasoning so it beats the
@@ -3286,6 +3692,39 @@ export class ChatService {
           const r = tryVaiSelfKnowledge(content);
           return r ? { text: r.reply, turnKind: 'analysis', confidence: 0.97, strategy: `chat-vai-identity:${r.kind}` } : null;
         }, true, 'Grounded questions about Vai itself — identity, capabilities, engine, modes.'),
+        det('bounded-reasoning', 0.982, () => {
+          const bounded = boundedReasoningCandidate;
+          if (!bounded) return null;
+          return {
+            text: bounded.reply,
+            turnKind: 'analysis',
+            confidence: bounded.confidence,
+            strategy: bounded.strategy,
+            bypassCouncil: true,
+          };
+        }, true, 'Vai-owned verified execution of bounded logical, causal, quantitative, state, planning, and control representations.'),
+        det('trick-question', 0.974, () => {
+          const result = detectTrickQuestion(understoodContent);
+          if (!result) return null;
+          return {
+            text: result.answer,
+            turnKind: 'analysis',
+            confidence: result.confidence,
+            strategy: `trick-question:${result.kind}`,
+            bypassCouncil: true,
+          };
+        }, true, 'Vai-owned bounded reasoning for recognized constraint, algebra, and inclusion traps.'),
+        det('reliable-job-design', 0.973, () => {
+          const result = tryReliableJobDesign(understoodContent);
+          if (!result) return null;
+          return {
+            text: result.reply,
+            turnKind: 'analysis',
+            confidence: result.confidence,
+            strategy: 'reliable-job-design',
+            bypassCouncil: true,
+          };
+        }, true, 'Vai-owned systems design derived from durability, duplicate-safety, recovery, overload, evidence, and rollout invariants.'),
         det('conversation-reasoning', 0.97, () => {
           const r = tryEmitConversationReasoning({ content: understoodContent, history: metaHistory });
           return r
@@ -3460,7 +3899,13 @@ export class ChatService {
       const questionIntent = questionIntentResult.intent;
       dispatchQuestionIntent = questionIntent;
       let activeGuidance: readonly RouteGuidance[] = [];
-      if (this.guidanceStore) {
+      // A verified bounded program has already parsed, executed, and checked the
+      // user's contract. Historical human/Council route preferences must not
+      // decorate or re-rank that institutional result; doing so polluted the
+      // persisted plan with unrelated lessons and falsely implied model input.
+      if (boundedReasoningCandidate) {
+        activeGuidance = [];
+      } else if (this.guidanceStore) {
         activeGuidance = this.guidanceStore.loadActive(conversationId);
       } else if (this.loadActiveGuidance) {
         activeGuidance = this.loadActiveGuidance(conversationId);
@@ -3636,15 +4081,20 @@ export class ChatService {
           !shouldEscalateDeterministicDecline(winner.text, hasGenerativeFallback)
           && !deterministicAnswerTooWeak
         ) {
-          const council = await this.runCouncilReview({
-            prompt: content,
-            draftText: winner.text,
-            modelId: winner.strategy,
-            turnKind: winner.turnKind,
-            confidence: winner.confidence,
-            history: history.map((m) => ({ role: m.role, content: m.content })),
-            conversationId,
-          });
+          if (winner.selfImprovement) {
+            this.triggerVaiOwnedSelfImprovement(content, winner.selfImprovement);
+          }
+          const council = winner.bypassCouncil
+            ? undefined
+            : await this.runCouncilReview({
+                prompt: content,
+                draftText: winner.text,
+                modelId: winner.strategy,
+                turnKind: winner.turnKind,
+                confidence: winner.confidence,
+                history: history.map((m) => ({ role: m.role, content: m.content })),
+                conversationId,
+              });
           yield* this.emitDeterministicTurn({
             conversationId,
             conversationTitle: conv.title,
@@ -3688,10 +4138,13 @@ export class ChatService {
     const resolvedMode = isConversationMode(conv.mode) ? conv.mode : DEFAULT_CONVERSATION_MODE;
     const isTerminalHarness = Boolean(systemPrompt?.includes('TERMINAL_HARNESS_V1'));
     const modePrompt = isTerminalHarness ? null : CONVERSATION_MODE_SYSTEM_PROMPTS[resolvedMode];
-    const systemMessages: Message[] = [];
+    const systemMessages: Message[] = [{ role: 'system', content: UNTRUSTED_CONTENT_POLICY }];
     const hasActiveSandbox = Boolean(conv.sandboxProjectId);
+    const activeProjectExecutionTurn = isActiveProjectExecutionTurn(hasActiveSandbox, effectiveContent);
     const turnKind = isTerminalHarness
       ? 'analysis'
+      : activeProjectExecutionTurn
+        ? 'builder'
       : classifyChatTurn({
         userContent: effectiveContent,
         mode: resolvedMode,
@@ -3757,6 +4210,10 @@ export class ChatService {
         : buildFactsSystemPrelude(extractConversationFacts(contractHistory));
       if (conversationPrelude) {
         systemMessages.push({ role: 'system', content: conversationPrelude });
+      }
+      const dialoguePrelude = buildDialogueSystemPrelude(contractHistory);
+      if (dialoguePrelude) {
+        systemMessages.push({ role: 'system', content: dialoguePrelude });
       }
     }
 
@@ -3907,15 +4364,35 @@ export class ChatService {
             content: [
               "Potentially relevant excerpts from Vai's local knowledge store (may be incomplete or dated—verify important facts).",
               'Use only what fits the question; do not invent citations. If you rely on a specific claim, note it came from retrieved context.',
-              knowledgeSnippets,
+              wrapUntrustedContent('web-content', knowledgeSnippets, { source: 'retrieved local knowledge store' }),
             ].join('\n'),
           });
         }
       }
 
-      return requestSystemMessages.length > 0
+      const combinedMessages = requestSystemMessages.length > 0
         ? [...requestSystemMessages, ...modelChatMessages]
         : modelChatMessages;
+      const modelContextWindow = this.models.tryGet(modelId)?.contextWindow ?? LIMITS.defaultModelContextTokens;
+      const lastMessageIndex = combinedMessages.length - 1;
+      const budgeted = budgetContext({
+        modelId,
+        contextWindow: modelContextWindow,
+        reservedTokens: Math.min(LIMITS.reservedModelOutputTokens, Math.floor(modelContextWindow / 4)),
+        candidates: combinedMessages.map((message, index) => ({
+          id: `message:${index}`,
+          tier: message.role === 'system' || index === lastMessageIndex ? 0 : index >= lastMessageIndex - 6 ? 1 : 4,
+          kind: message.role === 'system' ? 'system' : index === lastMessageIndex ? 'turn' : 'history',
+          content: message.content,
+          reason: message.role === 'system'
+            ? 'standing policy or active-turn instruction'
+            : index === lastMessageIndex
+              ? 'current user turn'
+              : index >= lastMessageIndex - 6 ? 'recent conversation context' : 'older conversation history',
+        })),
+      });
+      const includedIds = new Set(budgeted.items.map((item) => item.id));
+      return combinedMessages.filter((_, index) => includedIds.has(`message:${index}`));
     };
 
     const primaryModelId = conv.modelId;
@@ -3996,15 +4473,24 @@ export class ChatService {
     // narrows them to their `null` initializer.
     const currentTurnEvidence = () => turnEvidencePersist;
     const currentPrefetchedEvidence = () => prefetchedEvidenceChunk;
+    const currentEvidenceSearchResult = () => evidenceSearchResult;
 
     const resolvePrefetchedEvidence = async (): Promise<void> => {
       if (!this.searchForEvidence || !shouldAttachWebEvidence) return;
       try {
-        const searchResult = await fetchTurnWebEvidence(effectiveContent, chatMessages, {
+        let searchResult = await fetchTurnWebEvidence(effectiveContent, chatMessages, {
           testMode: false,
           search: (query, budgetMs) => this.searchForEvidence!(query, budgetMs),
           searchBudgetMs: 15_000,
         }, { activeMode: resolvedMode, hasActiveSandbox }, { ignoreLocalDefer: true });
+        // Mutable venue details must not fall through to a corpus/model guess
+        // because one keyless provider had a transient empty response. Retry
+        // the same bounded deterministic pipeline once; empty search responses
+        // are not cached, while a successful first request never pays this cost.
+        if (detectVenuePracticalDetail(effectiveContent)
+          && (!searchResult || !shouldShipGroundedSearchConclusion(searchResult))) {
+          searchResult = await this.searchForEvidence(effectiveContent, 15_000);
+        }
         if (!searchResult) return;
         evidenceSearchResult = searchResult;
         const rawChunk = buildSourcesChunkFromSearch(effectiveContent, searchResult, turnKind);
@@ -4120,6 +4606,56 @@ export class ChatService {
       for (const chunk of yieldPrefetchedEvidence()) {
         yield chunk;
       }
+    }
+
+    const groundedSearchResult = currentEvidenceSearchResult();
+    if (groundedSearchResult && shouldShipGroundedSearchConclusion(groundedSearchResult)) {
+      yield* this.emitDeterministicTurn({
+        conversationId,
+        conversationTitle: conv.title,
+        content,
+        reply: groundedSearchResult.answer,
+        strategy: 'vai:web-grounded-conclusion',
+        confidence: groundedSearchResult.confidence,
+        plan: turnPlan ?? undefined,
+        baselinePlan: turnBaselinePlan ?? undefined,
+        evidence: currentTurnEvidence() ?? undefined,
+        preChunks: [{
+          type: 'progress',
+          progress: {
+            stage: 'answer',
+            label: groundedSearchResult.plan.intent === 'venue-hours'
+              ? 'Answering from the verified official opening-hours page'
+              : 'Answering from the verified official venue page',
+            status: 'done',
+          },
+        } as ChatChunk],
+      });
+      return;
+    }
+
+    // Mutable venue details are not safe model-rewrite territory. If the
+    // deterministic evidence path did not clear its source + answer-shape gate,
+    // stop here with an explicit limitation instead of letting a model invent,
+    // round, translate, or alter a time/price/address from thin evidence.
+    const requestedVenuePracticalKind = detectVenuePracticalDetail(effectiveContent);
+    if (requestedVenuePracticalKind && shouldAttachWebEvidence) {
+      const limitation = groundedSearchResult
+        ? buildVenuePracticalEvidenceLimitation(groundedSearchResult)
+        : null;
+      yield* this.emitDeterministicTurn({
+        conversationId,
+        conversationTitle: conv.title,
+        content,
+        reply: limitation
+          ?? `I couldn't verify the requested current venue detail for that exact branch from reliable live sources. I won't guess or substitute another branch's information.`,
+        strategy: 'vai:web-evidence-limitation',
+        confidence: groundedSearchResult?.confidence ?? 0,
+        plan: turnPlan ?? undefined,
+        baselinePlan: turnBaselinePlan ?? undefined,
+        evidence: currentTurnEvidence() ?? undefined,
+      });
+      return;
     }
 
     const primaryMessages = buildMessagesForModel(primaryModelId);
@@ -4297,9 +4833,48 @@ export class ChatService {
       const primaryHadEvidence = bufferedSourceChunks.some(
         (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
       );
+      // The primary vai:v0 adapter has its own live search pipeline. If the
+      // eager prefetch was transiently empty but that pipeline found evidence,
+      // correct the visible search stage instead of leaving the contradictory
+      // "No web sources found" label above a grounded source card.
+      if (primaryHadEvidence && !currentTurnEvidence()) {
+        const sourced = bufferedSourceChunks.find(
+          (chunk) => chunk.type === 'sources' && (chunk.sources?.length ?? 0) > 0,
+        );
+        if (sourced?.sources?.length) {
+          turnEvidencePersist = {
+            sources: sourced.sources,
+            sourcePresentation: sourced.sourcePresentation,
+            researchTrace: sourced.researchTrace,
+            followUps: sourced.followUps,
+            confidence: sourced.confidence,
+          };
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'search',
+              label: `Found ${sourced.sources.length} source${sourced.sources.length === 1 ? '' : 's'}`,
+              detail: `${sourced.sources.length} source${sourced.sources.length === 1 ? '' : 's'}`,
+              status: 'done',
+              processLog: buildSearchProcessLog({
+                prompt: effectiveContent,
+                sources: sourced.sources,
+                researchTrace: sourced.researchTrace,
+              }),
+            },
+          } as ChatChunk;
+        }
+      }
+      const practicalDetailKind = detectVenuePracticalDetail(effectiveContent);
+      const primaryIsGroundedPracticalAnswer = Boolean(
+        practicalDetailKind
+        && primaryHadEvidence
+        && /\[\d+\]/.test(bufferedText)
+        && answerMatchesVenuePracticalDetail(practicalDetailKind, bufferedText),
+      );
       let reviewReplacedPrimary = false;
       let codeReviewRejected = false;
-      if (!primaryFlip && !builderFiles && this.shouldReviewDraft(content, bufferedText)) {
+      if (!primaryFlip && !builderFiles && !primaryIsGroundedPracticalAnswer && this.shouldReviewDraft(content, bufferedText)) {
         yield {
           type: 'progress',
           progress: {
@@ -4365,7 +4940,7 @@ export class ChatService {
       let councilThinking: CouncilThinking | undefined;
       let councilAuditMeta: AuditMeta | undefined;
       let councilEscalateToGenerative = false;
-      if (!primaryFlip && !builderFiles && !codeReviewRejected && bufferedText.trim()) {
+      if (!primaryFlip && !builderFiles && !codeReviewRejected && !primaryIsGroundedPracticalAnswer && bufferedText.trim()) {
         // First-draft race: Vai's quick take is already on screen (vai-draft step);
         // members field their own candidates and everyone votes. A winning member
         // draft REPLACES the base draft here, then goes through the normal council
@@ -4483,6 +5058,15 @@ export class ChatService {
               }),
             },
           } as ChatChunk;
+        }
+      }
+
+      if (!isBuilderMode) {
+        const normalized = unwrapNaturalLanguageResponseEnvelope(content, bufferedText);
+        if (normalized !== bufferedText) {
+          bufferedText = normalized;
+          reviewReplacedPrimary = true;
+          if (STREAM_DRAFTS && draftStarted) yield draftChunk('reset', bufferedText);
         }
       }
 
@@ -4636,34 +5220,6 @@ export class ChatService {
         }
       } else {
         const fallbackLabel = fallbackModelId.replace(/^(?:local|openai|anthropic|google):/, '');
-        yield {
-          type: 'progress',
-          progress: {
-            stage: 'escalate',
-            label: primaryFlip
-              ? `Handing this to ${fallbackLabel} — my generative arm`
-              : councilEscalateToGenerative
-                ? `Council escalated — handing to ${fallbackLabel}`
-              : `Not in my memory yet — asking ${fallbackLabel}`,
-            detail: councilEscalateToGenerative && councilThinking?.summary
-              ? councilThinking.summary
-              : undefined,
-            status: 'running',
-          },
-        } as ChatChunk;
-        yield {
-          type: 'fallback_notice',
-          fallback: {
-            fromModelId: primaryModelId,
-            toModelId: fallbackModelId,
-            reason: fallbackDecision.reason,
-          },
-        };
-        yield {
-          type: 'progress',
-          progress: { stage: 'answer', label: `${fallbackLabel} is writing the answer`, status: 'running' },
-        } as ChatChunk;
-
         const fallbackAdapter = this.models.get(fallbackModelId);
         const fallbackMessages = buildMessagesForModel(fallbackModelId, { fallback: true });
         let fallbackDurationMs = 0;
@@ -4717,9 +5273,15 @@ export class ChatService {
         let councilEditUsed = false;
         let councilKnownUnsafeReason: string | null = null;
         let councilEditRejected = false;
+        let councilFreshBuildRejected = false;
+        let councilFreshBuildUnsafeReason: string | null = null;
         let terminalCouncilEditRefusal = false;
+        let councilGenerationStarted = false;
         console.log(`[builder-arm] isBuilderMode=${isBuilderMode} mode=${resolvedMode} turnKind=${turnKind} councilFlag=${process.env.VAI_COUNCIL_CODEGEN !== '0'} brief=${JSON.stringify(content.slice(0, 60))}`);
-        if (isBuilderMode && process.env.VAI_COUNCIL_CODEGEN !== '0' && buildExecutionRequired && !needsLiveExternalEvidence(content, webConclusionContext)) {
+        if (isBuilderMode
+          && process.env.VAI_COUNCIL_CODEGEN !== '0'
+          && buildExecutionRequired
+          && (activeProjectExecutionTurn || !needsLiveExternalEvidence(content, webConclusionContext))) {
           const councilMembers = this.builderCouncilMembers();
           // Active-sandbox awareness: when the desktop attached the running
           // project (name + file snapshots), an iteration-shaped prompt must
@@ -4794,23 +5356,78 @@ export class ChatService {
               },
             } as ChatChunk;
           }
+          const pendingCouncilWork = councilEdit
+            ? this.getPendingCouncilWorkArtifact(conversationId, conv.sandboxProjectId ?? null)
+            : null;
+          const resumeCouncilProposal = pendingCouncilWork
+            && shouldResumeCouncilProposal(content, pendingCouncilWork.proposal)
+            ? pendingCouncilWork.proposal
+            : undefined;
+          if (resumeCouncilProposal && councilEdit) {
+            const selectedPaths = new Set(councilEdit.files.map((file) => file.path));
+            const restoredProposalFiles = resumeCouncilProposal.files
+              .filter((file) => !selectedPaths.has(file.path))
+              .map((file) => ({ path: file.path, content: file.content }));
+            if (restoredProposalFiles.length > 0) {
+              councilEdit = {
+                ...councilEdit,
+                files: [...councilEdit.files, ...restoredProposalFiles],
+              };
+            }
+          }
+          if (resumeCouncilProposal) {
+            const issueCount = resumeCouncilProposal.validation.errors.length
+              + resumeCouncilProposal.validation.softErrors.length
+              + resumeCouncilProposal.reviews.reduce((total, review) => total + review.mustFix.length, 0);
+            yield {
+              type: 'progress',
+              progress: {
+                stage: 'council-resume',
+                label: `Continuing the withheld ${resumeCouncilProposal.projectName} proposal`,
+                detail: `${resumeCouncilProposal.files.length} proposed file(s) and ${issueCount} unresolved issue(s) restored from shared task context`,
+                status: 'done',
+              },
+            } as ChatChunk;
+          }
           if (councilMembers.length > 0 && !lostBoundWorkspace) {
+            councilGenerationStarted = true;
             const councilStartedAt = Date.now();
             console.log(`[council] start members=${councilMembers.map((m) => m.id).join(',')} edit=${Boolean(councilEdit)} brief=${JSON.stringify(content.slice(0, 80))}`);
             try {
               // Per-stage wall clocks so the desktop timeline can attribute cost to each
               // pipeline stage (architect/code/validate/review/repair/style/assemble).
               const councilStageStartedAt = new Map<string, number>();
-              for await (const event of councilGenerateApp({ brief: content, members: councilMembers, edit: councilEdit })) {
+              for await (const event of councilGenerateApp({
+                brief: content,
+                members: councilMembers,
+                edit: councilEdit,
+                resume: resumeCouncilProposal,
+              })) {
                 if (event.type === 'stage') {
                   console.log(`[council] ${event.stage}/${event.status}: ${event.label}${event.detail ? ` — ${event.detail.slice(0, 140)}` : ''}`);
                 } else {
                   console.log(`[council] result: ${event.result ? `shipped (${event.result.memberIds.join(',')}, repairs=${event.result.repairsUsed})` : 'null'}`);
+                  if (event.withheld && councilEdit) {
+                    this.persistCouncilWorkArtifact(
+                      conversationId,
+                      conv.sandboxProjectId ?? null,
+                      event.withheld,
+                    );
+                  } else if (event.result && pendingCouncilWork) {
+                    this.resolveCouncilWorkArtifact(
+                      pendingCouncilWork.id,
+                      resumeCouncilProposal ? 'applied' : 'superseded',
+                    );
+                  }
                   if (!event.result && councilEdit) councilEditRejected = true;
+                  if (!event.result && !councilEdit) councilFreshBuildRejected = true;
                 }
                 if (event.type === 'stage') {
                   if (event.stage === 'validate' && /Edit (?:refused|withheld)/i.test(event.label)) {
                     councilKnownUnsafeReason = event.detail || event.label;
+                  }
+                  if (!councilEdit && event.stage === 'validate' && /(?:checks found|refused|withheld|failed)/i.test(event.label)) {
+                    councilFreshBuildUnsafeReason = event.detail || event.label;
                   }
                   const stageKey = `council-${event.stage}`;
                   if (!councilStageStartedAt.has(stageKey)) councilStageStartedAt.set(stageKey, Date.now());
@@ -4858,12 +5475,15 @@ export class ChatService {
           }
         }
 
-        // A reviewer-proven unsafe edit is a quality refusal, not a reason to
-        // hand the same task to an unreviewed one-shot fallback. Preserve the
-        // user's files and say exactly which blocker remained.
-        if (!councilResult && (councilKnownUnsafeReason || councilEditRejected)) {
+        // A validator-proven unsafe build/edit is a quality refusal, not a
+        // reason to hand the same task to an unreviewed one-shot fallback.
+        if (!councilResult && (councilKnownUnsafeReason || councilEditRejected || councilFreshBuildRejected)) {
           terminalCouncilEditRefusal = true;
-          const reason = councilKnownUnsafeReason ?? 'the proposed project edit did not clear Council validation';
+          const reason = councilKnownUnsafeReason
+            ?? councilFreshBuildUnsafeReason
+            ?? (councilEditRejected
+              ? 'the proposed project edit did not clear Council validation'
+              : 'the proposed app did not clear Council validation');
           const compactReason = reason
             .replace(/\s+/g, ' ')
             .split(/\s*\|\s*/)
@@ -4871,7 +5491,9 @@ export class ChatService {
             .slice(0, 2)
             .join(' · ')
             .slice(0, 280);
-          const text = `No project changes were applied. Vai withheld this edit because validation still failed: ${compactReason}${reason.length > compactReason.length ? '…' : ''} Open the work journal for the failed checks.`;
+          const text = councilFreshBuildRejected
+            ? `No project was created. Vai withheld this build because validation still failed: ${compactReason}${reason.length > compactReason.length ? '…' : ''} Open the work journal for the failed checks.`
+            : `No project changes were applied. Vai withheld this edit because validation still failed: ${compactReason}${reason.length > compactReason.length ? '…' : ''} Open the work journal for the failed checks.`;
           councilResult = {
             chunks: [{ type: 'done', usage: { promptTokens: 0, completionTokens: 0 }, durationMs: 0 } as ChatChunk],
             sourceChunks: [],
@@ -4879,8 +5501,45 @@ export class ChatService {
             durationMs: 0,
             usage: { promptTokens: 0, completionTokens: 0 },
           };
-          councilEditUsed = true;
+          councilEditUsed = councilEditRejected || Boolean(councilKnownUnsafeReason);
           responseModelId = 'vai:council-quality-gate';
+        }
+
+        // Announce model ownership only when the generic fallback really takes
+        // ownership. Builder turns try Council first, whose stage events name
+        // the actual architect/coder; emitting this before Council created a
+        // false qwen3 handoff even when qwen2.5-coder wrote the implementation.
+        const fallbackOwnershipLabel = resolveFallbackOwnershipLabel({
+          fallbackLabel,
+          councilOwnsResult: Boolean(councilResult),
+          councilGenerationStarted,
+          primaryFlip,
+          councilEscalated: councilEscalateToGenerative,
+        });
+        if (fallbackOwnershipLabel) {
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'escalate',
+              label: fallbackOwnershipLabel,
+              detail: councilEscalateToGenerative && councilThinking?.summary
+                ? councilThinking.summary
+                : undefined,
+              status: 'running',
+            },
+          } as ChatChunk;
+          yield {
+            type: 'fallback_notice',
+            fallback: {
+              fromModelId: primaryModelId,
+              toModelId: fallbackModelId,
+              reason: fallbackDecision.reason,
+            },
+          };
+          yield {
+            type: 'progress',
+            progress: { stage: 'answer', label: `${fallbackLabel} is writing the answer`, status: 'running' },
+          } as ChatChunk;
         }
 
         const usedCouncilArtifact = councilResult !== null;
@@ -4889,7 +5548,7 @@ export class ChatService {
         fallbackDurationMs += fallbackResult.durationMs;
         let fbText = isBuilderMode
           ? repairBuilderFallbackFileBlocks(fallbackResult.text).text
-          : fallbackResult.text;
+          : unwrapNaturalLanguageResponseEnvelope(content, fallbackResult.text);
         // A council artifact already passed an internal compile gate + council
         // review + bounded repair, so it is held to the DEFAULT anchor gate —
         // the strict fallback threshold was tuned for unvalidated one-shot
@@ -5020,14 +5679,15 @@ export class ChatService {
           const repairResult = await collectFallback(repairMessages);
           totalUsage = addTokenUsage(totalUsage, repairResult.usage);
           fallbackDurationMs += repairResult.durationMs;
+          const normalizedRepairText = unwrapNaturalLanguageResponseEnvelope(content, repairResult.text);
           const repairedQuality = evaluateChatAnswerQuality({
             prompt: content,
-            response: repairResult.text,
+            response: normalizedRepairText,
             strategy: fallbackModelId,
           });
           if (scoreAnswerQuality(repairedQuality) > scoreAnswerQuality(fbAnswerQuality)) {
             fallbackResult = repairResult;
-            fbText = repairResult.text;
+            fbText = normalizedRepairText;
             fbAnswerQuality = repairedQuality;
           }
           if (fbAnswerQuality.verdict === 'fail') {
@@ -5123,7 +5783,7 @@ export class ChatService {
             ? { ...loop.auditMeta, draftStrategy: responseModelId }
             : undefined;
           const preFallbackCouncilText = fbText;
-          if (loop.revised) fbText = loop.finalText;
+          if (loop.revised) fbText = unwrapNaturalLanguageResponseEnvelope(content, loop.finalText);
           if (fallbackCouncilAuditMeta) {
             fallbackCouncilAuditMeta = withCouncilAuditVisibility(fallbackCouncilAuditMeta, {
               beforeText: preFallbackCouncilText,
@@ -5138,6 +5798,9 @@ export class ChatService {
         // quality gates apply); everything else is verified. The local model has
         // no retrieval, so confident factual claims are inherently ungrounded —
         // calibrate them rather than letting confident-wrong re-emerge here.
+        if (!isBuilderMode) {
+          fbText = unwrapNaturalLanguageResponseEnvelope(content, fbText);
+        }
         const fbBuilderFiles = isBuilderMode && hasBuilderFileBlocks(fbText);
         const fbHasEvidence = fallbackResult.sourceChunks.some(
           (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
@@ -5532,6 +6195,14 @@ export class ChatService {
     plan?: DispatchPlan;
     /** Unsteered shadow plan — key reference point for "did steering help?" analysis. */
     baselinePlan?: DispatchPlan;
+    /** Persisted source evidence for deterministic web conclusions. */
+    evidence?: {
+      sources: NonNullable<ChatChunk['sources']>;
+      sourcePresentation?: ChatChunk['sourcePresentation'];
+      researchTrace?: ChatChunk['researchTrace'];
+      followUps?: ChatChunk['followUps'];
+      confidence?: number;
+    };
     /** SCIS council review of this draft (when roster configured and convened). */
     council?: CouncilThinking;
     /** Classified question-intent + which layer decided it, for the route plan. */
@@ -5571,11 +6242,16 @@ export class ChatService {
     // Persist the (steered) plan + baseline as JSON reference data on the message row.
     // This + the route_guidances rows give us the longitudinal points needed to
     // measure steering benefit and detect when re-calibration is warranted.
-    const planBlob = args.plan
+    const planBlob = args.plan || args.evidence
       ? JSON.stringify({
-          steered: args.plan,
-          baseline: args.baselinePlan ?? null,
-          hadGuidance: !!args.baselinePlan,
+          ...(args.plan
+            ? {
+                steered: args.plan,
+                baseline: args.baselinePlan ?? null,
+                hadGuidance: !!args.baselinePlan,
+              }
+            : {}),
+          ...(args.evidence ? { evidence: args.evidence } : {}),
         })
       : undefined;
 
@@ -5610,4 +6286,79 @@ export class ChatService {
    */
   private buildComparisonConceptExplainer(): ((concept: string) => { summary: string } | null) | undefined {
     const retrieve = this.retrieveKnowledge;
-    if (
+    if (!retrieve) return undefined;
+    return (concept: string) => {
+      const c = (concept || '').trim();
+      if (c.length < 2) return null;
+      const top = retrieve(c, 1)?.[0];
+      if (!top || top.text.length < 40) return null;
+      const salient = c.toLowerCase().split(/\s+/).find((w) => w.length >= 3);
+      if (salient && !top.text.toLowerCase().includes(salient)) return null;
+      const summary = top.text.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ').trim();
+      return summary.length > 0 ? { summary } : null;
+    };
+  }
+
+  private generateTitle(firstMessage: string): string {
+    // Clean up and truncate the first user message into a chat title
+    const cleaned = firstMessage
+      .replace(/\n+/g, ' ')      // flatten newlines
+      .replace(/\s+/g, ' ')       // collapse whitespace
+      .trim();
+
+    if (cleaned.length <= 40) return cleaned;
+
+    // Cut at word boundary
+    const truncated = cleaned.slice(0, 40);
+    const lastSpace = truncated.lastIndexOf(' ');
+    return (lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated) + '...';
+  }
+
+  deleteConversation(conversationId: string): void {
+    this.db.delete(councilWorkArtifacts)
+      .where(eq(councilWorkArtifacts.conversationId, conversationId))
+      .run();
+    this.db.delete(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .run();
+    this.db.delete(conversations)
+      .where(eq(conversations.id, conversationId))
+      .run();
+  }
+
+  /**
+   * For legacy conversations created before auth (ownerUserId null, e.g. under dev bypass),
+   * assign ownership to the now-authenticated user so they can update it.
+   * Called on first write access after sign-in.
+   */
+  assignOwnerIfLegacy(conversationId: string, ownerUserId: string): void {
+    const conv = this.getConversation(conversationId);
+    if (conv && !conv.ownerUserId) {
+      this.db.update(conversations)
+        .set({ ownerUserId, updatedAt: new Date() })
+        .where(eq(conversations.id, conversationId))
+        .run();
+    }
+  }
+}
+
+function reviewLabelForDraft(prompt: string, draft: string): string {
+  return shouldPeerReviewCode(prompt, draft)
+    ? 'Asking peers to review the code draft'
+    : 'Asking local friends to check the draft';
+}
+
+function formatFriendReviewDetail(review: {
+  reason: string;
+  reviewers: readonly string[];
+  concerns: readonly string[];
+  suggestions: readonly string[];
+}): string {
+  const parts = [
+    review.reason,
+    review.reviewers.length > 0 ? `Reviewed by ${review.reviewers.join(', ')}` : '',
+    review.concerns.length > 0 ? `Concerns: ${review.concerns.slice(0, 3).join('; ')}` : '',
+    review.suggestions.length > 0 ? `Suggestions: ${review.suggestions.slice(0, 3).join('; ')}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'Peer review completed';
+}

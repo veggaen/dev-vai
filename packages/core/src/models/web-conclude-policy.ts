@@ -1,4 +1,5 @@
 import { isGenerationIntent } from '../chat/chat-quality.js';
+import { detectVenuePracticalDetail } from '../venue-practical-detail.js';
 
 const EXPLICIT_WEB_SEARCH_PATTERN =
   /^(?:just\s+)?google\s+(?:it\s*[:\-–—]?\s*)?.+|^(?:just\s+)?google\s+(?:it|that)$|^(?:can\s+you\s+)?(?:search|look\s+up|find)\s+(?:for\s+|about\s+)?.+|^(?:go\s+)?search\s+(?:the\s+web|online|google)\s+(?:for\s+)?.+|^google[:\s]+.+|^use\s+web\s+search\b/i;
@@ -131,6 +132,7 @@ export function needsLiveExternalEvidence(
 
   if (isExplicitResearchRequest(trimmed)) return true;
   if (isFreshLocalRecommendationRequest(trimmed)) return true;
+  if (isFreshVenuePracticalDetailRequest(trimmed)) return true;
   if (isFreshLocalBusinessContactRequest(trimmed)) return true;
   if (BLOCKS_WEB_PATTERN.test(trimmed.toLowerCase())) return false;
 
@@ -265,9 +267,12 @@ export function isBusinessOpportunityRequest(input: string): boolean {
 export function isFreshLocalBusinessContactRequest(input: string): boolean {
   const normalized = normalizeWebConclusionInput(input);
   if (!normalized || !BUSINESS_CONTACT_DETAIL_PATTERN.test(normalized)) return false;
-  return isExplicitResearchRequest(normalized)
-    || /\b(?:online|web|google)\b/i.test(normalized)
-    || /\b(?:current|currently|latest|up[\s-]?to[\s-]?date)\b/i.test(normalized);
+  return true;
+}
+
+/** Venue/service details are mutable even when the user does not say "current". */
+export function isFreshVenuePracticalDetailRequest(input: string): boolean {
+  return detectVenuePracticalDetail(normalizeWebConclusionInput(input)) !== null;
 }
 
 export function isMetaCognitiveKnowledgePattern(pattern: string): boolean {
@@ -357,6 +362,7 @@ export function shouldConcludeWithWebSearch(
   const trimmed = normalizeWebConclusionInput(input);
   if (isExplicitResearchRequest(trimmed)) return true;
   if (isFreshLocalRecommendationRequest(trimmed)) return true;
+  if (isFreshVenuePracticalDetailRequest(trimmed)) return true;
   if (isFreshLocalBusinessContactRequest(trimmed)) return true;
   if (FACTUAL_QUESTION_PATTERN.test(trimmed)) return true;
   if (/\?/.test(trimmed)) return true;

@@ -10,7 +10,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { SearchPipeline } from '@vai/core';
-import { searchPlanBodySchema, searchQueryBodySchema } from '@vai/api-types/search';
+import { searchPlanBodySchema, searchQueryBodySchema } from '@vai/contracts/search';
 import { invalidRequestBody } from '../validation/http-validation.js';
 
 export function registerSearchRoutes(

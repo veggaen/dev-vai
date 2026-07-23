@@ -54,4 +54,16 @@ describe('algorithm-codegen extraction', () => {
     const src = tryAlgorithmCodeGen.toString();
     expect(src.includes('this.')).toBe(false);
   });
+
+  it.each([
+    ['Write a TypeScript function chunk<T>(items: readonly T[], size: number): T[][] that preserves order.', 'chunk', 'items', 'size'],
+    ['Implement TypeScript function groupsOf<T>(values: readonly T[], width: number): T[][] to split values in order.', 'groupsOf', 'values', 'width'],
+    ['Write TypeScript function batches<T>(records: readonly T[], batchSize: number): T[][] that keeps input order.', 'batches', 'records', 'batchSize'],
+  ])('synthesizes the supplied typed grouping contract: %s', (prompt, name, items, size) => {
+    const output = tryAlgorithmCodeGen(prompt, () => 'unused') ?? '';
+    expect(output).toContain(`function ${name}<T>(${items}: readonly T[], ${size}: number): T[][]`);
+    expect(output).toContain(`Number.isInteger(${size})`);
+    expect(output).toContain(`${items}.slice(`);
+    expect(output).toContain(`${name}([], 2)`);
+  });
 });
