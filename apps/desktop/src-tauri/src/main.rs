@@ -322,6 +322,11 @@ async fn start_engine(app: tauri::AppHandle, state: State<'_, SidecarState>) -> 
     }
 
     let runtime_entry = runtime_entry_path(&app)?;
+    let build_evidence_root = runtime_entry
+        .parent()
+        .and_then(|dist_dir| dist_dir.parent())
+        .map(|runtime_root| runtime_root.join(env!("VAI_BUILD_EVIDENCE_FOLDER")))
+        .ok_or_else(|| "Runtime evidence directory could not be resolved".to_string())?;
 
     let sidecar_path = runtime_sidecar_path()?;
     let exe_dir = executable_dir()?;
@@ -350,6 +355,7 @@ async fn start_engine(app: tauri::AppHandle, state: State<'_, SidecarState>) -> 
         .env("VAI_PORT", env!("VAI_RUNTIME_PORT"))
         .env("VAI_DB_PATH", db_path)
         .env("VAI_ENV_FILE", env_file)
+        .env("VAI_BUILD_EVIDENCE_ROOT", build_evidence_root)
         .stdout(Stdio::from(stdout_log))
         .stderr(Stdio::from(stderr_log));
 

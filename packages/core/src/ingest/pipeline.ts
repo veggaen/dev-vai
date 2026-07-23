@@ -44,6 +44,11 @@ export class IngestPipeline {
     private engine: VaiEngine,
   ) {}
 
+  /** Bounded read used by runtime health; it does not hydrate or scan the corpus. */
+  probe(): void {
+    this.db.select({ id: sources.id }).from(sources).limit(1).all();
+  }
+
   /**
    * Hydrate the engine from persisted data on startup.
    * Loads L0 chunks into the n-gram model and L1 summaries as knowledge entries.

@@ -19,7 +19,7 @@
     "app:update:runtime": "node scripts/update-desktop-runtime.mjs",
     "test": "node node_modules/vitest/vitest.mjs run",
     "test:watch": "node node_modules/vitest/vitest.mjs",
-    "lint": "node scripts/check-platform-constants.mjs && eslint .",
+    "lint": "node scripts/run-lint.mjs",
     "lint:constants": "node scripts/check-platform-constants.mjs",
     "credentials:list": "node scripts/vai-credentials.mjs list",
     "credentials:revoke": "node scripts/vai-credentials.mjs revoke",

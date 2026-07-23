@@ -16,8 +16,12 @@ fn export_platform_constants() {
     let database_name = manifest["persistedNames"]["database"]
         .as_str()
         .expect("persistedNames.database must be a string");
+    let build_evidence_folder = manifest["persistedNames"]["buildEvidenceFolder"]
+        .as_str()
+        .expect("persistedNames.buildEvidenceFolder must be a string");
     println!("cargo:rustc-env=VAI_RUNTIME_PORT={runtime_port}");
     println!("cargo:rustc-env=VAI_DATABASE_FILENAME={database_name}");
+    println!("cargo:rustc-env=VAI_BUILD_EVIDENCE_FOLDER={build_evidence_folder}");
 }
 
 fn normalized_relative(root: &Path, file: &Path) -> String {

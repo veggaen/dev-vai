@@ -134,19 +134,25 @@ describe('ChatService relational dialogue path', () => {
     const service = new ChatService(db, models, {
       primaryGenerativeFlip: false,
       selfAssessmentEvidence: () => ({
+        schemaVersion: 1,
         capturedAt: '2026-07-19T07:54:13.000Z',
         runtime: { sourceId: 'runtime:process', healthy: true, engine: 'vai:v0' },
+        build: {
+          sourceId: 'build:source-git', available: true, runtimeKind: 'source',
+          commit: 'a'.repeat(40), branch: 'cap/synthesis-page', version: '0.2.0',
+          builtAt: null, dirty: true,
+        },
         repository: {
-          sourceId: 'git:status', available: true, branch: 'cap/synthesis-page',
+          sourceId: 'git:source-status', available: true, branch: 'cap/synthesis-page',
           changedFiles: 103, modifiedFiles: 82, untrackedFiles: 21,
         },
         verification: {
-          sourceId: 'verification:receipt', available: true, status: 'pass',
+          sourceId: 'verification:source-receipt', available: true, status: 'pass',
           capturedAt: '2026-07-19T07:54:13.000Z', totalTestsPassed: 1179,
           typechecks: ['@vai/core', '@vai/runtime'], stale: false,
         },
         selfImprovement: {
-          sourceId: 'self-improve:corpus', available: true, queuedFixes: 302,
+          sourceId: 'self-improve:source-corpus', available: true, queuedFixes: 302,
           qualified: 86, adopted: 0, pendingNominations: 2, integratedNominations: 1,
           latestRunStatus: 'aborted-runtime-down', latestRunAt: '2026-07-02T05:46:56.677Z',
         },
@@ -159,7 +165,7 @@ describe('ChatService relational dialogue path', () => {
     const lastAssistant = service.getMessages(conversationId).filter((message) => message.role === 'assistant').at(-1);
 
     expect(reply).toMatch(/verified improvement adoption/i);
-    expect(reply).toContain('[self-improve:corpus]');
+    expect(reply).toContain('[self-improve:source-corpus]');
     expect(reply).toContain('86 qualified proposals; 0 adopted');
     expect(lastAssistant?.modelId).toBe('vai-self-assessment:verified-adoption-gap');
     expect(adapter.streamCalls).toBe(0);

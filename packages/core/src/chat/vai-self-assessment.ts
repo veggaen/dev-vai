@@ -1,4 +1,9 @@
 import type { Message } from '../models/adapter.js';
+import type {
+  VaiOperationalEvidenceSnapshot,
+} from '@vai/contracts/operational-evidence';
+
+export type { VaiOperationalEvidenceSnapshot } from '@vai/contracts/operational-evidence';
 
 /**
  * Vai-owned self-assessment for broad questions about Vai's engineering
@@ -15,46 +20,6 @@ export interface VaiSelfAssessmentResult {
   readonly kind: 'operational-introspection-gap' | 'verified-adoption-gap';
   readonly reply: string;
   readonly confidence: number;
-}
-
-export interface VaiOperationalEvidenceSnapshot {
-  readonly capturedAt: string;
-  readonly runtime: {
-    readonly sourceId: string;
-    readonly healthy: boolean;
-    readonly engine: string;
-  };
-  readonly repository: {
-    readonly sourceId: string;
-    readonly available: boolean;
-    readonly branch: string | null;
-    readonly changedFiles: number | null;
-    readonly modifiedFiles: number | null;
-    readonly untrackedFiles: number | null;
-    readonly error?: string;
-  };
-  readonly verification: {
-    readonly sourceId: string;
-    readonly available: boolean;
-    readonly status: 'pass' | 'fail' | 'unknown';
-    readonly capturedAt: string | null;
-    readonly totalTestsPassed: number | null;
-    readonly typechecks: readonly string[];
-    readonly stale: boolean;
-    readonly error?: string;
-  };
-  readonly selfImprovement: {
-    readonly sourceId: string;
-    readonly available: boolean;
-    readonly queuedFixes: number | null;
-    readonly qualified: number | null;
-    readonly adopted: number | null;
-    readonly pendingNominations: number | null;
-    readonly integratedNominations: number | null;
-    readonly latestRunStatus: string | null;
-    readonly latestRunAt: string | null;
-    readonly error?: string;
-  };
 }
 
 export function isVaiSelfAssessmentRequest(content: string): boolean {
@@ -97,6 +62,9 @@ export function tryEmitVaiSelfAssessment(input: {
   const evidenceLines = operational
     ? [
         `- [${operational.runtime.sourceId}] Runtime ${operational.runtime.healthy ? 'healthy' : 'unhealthy'}; engine ${operational.runtime.engine}; snapshot ${operational.capturedAt}.`,
+        operational.build.available
+          ? `- [${operational.build.sourceId}] ${operational.build.runtimeKind} build ${operational.build.version ?? 'unknown'} at commit ${operational.build.commit ?? 'unknown'}${operational.build.dirty ? ' (dirty source state)' : ''}${operational.build.builtAt ? `; built ${operational.build.builtAt}` : ''}.`
+          : `- [${operational.build.sourceId}] Build identity unavailable${operational.build.error ? `: ${operational.build.error}` : '.'}`,
         operational.repository.available
           ? `- [${operational.repository.sourceId}] Branch ${operational.repository.branch ?? 'unknown'}; ${operational.repository.changedFiles ?? 0} changed files (${operational.repository.modifiedFiles ?? 0} modified, ${operational.repository.untrackedFiles ?? 0} untracked).`
           : `- [${operational.repository.sourceId}] Repository evidence unavailable${operational.repository.error ? `: ${operational.repository.error}` : '.'}`,

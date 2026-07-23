@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { findVaiRepoRoot } from './agent-introspect.js';
 
 /**
  * Council changelog route — serves the self-improvement side-note (docs/COUNCIL-CHANGELOG.md) as
@@ -65,13 +64,16 @@ export interface CouncilChangelogDeps {
 
 export function registerCouncilChangelogRoutes(app: FastifyInstance, deps: CouncilChangelogDeps = {}): void {
   app.get('/api/council/changelog', async (request) => {
-    const repoRoot = deps.repoRoot ?? findVaiRepoRoot();
-    const target = path.join(repoRoot, CHANGELOG_RELATIVE);
+    const target = deps.repoRoot
+      ? path.join(deps.repoRoot, CHANGELOG_RELATIVE)
+      : undefined;
     const limitRaw = Number((request.query as { limit?: string } | undefined)?.limit);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 20;
     let entries: CouncilChangeEntry[] = [];
     try {
-      if (existsSync(target)) entries = parseCouncilChangelog(readFileSync(target, 'utf8'), limit);
+      if (target && existsSync(target)) {
+        entries = parseCouncilChangelog(readFileSync(target, 'utf8'), limit);
+      }
     } catch {
       entries = [];
     }

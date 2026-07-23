@@ -47,8 +47,12 @@ import { registerIdeRoutes } from './routes/ide.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerSteeringRoutes } from './routes/steering.js';
-import { findVaiRepoRoot, registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
+import { registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
 import { createVaiOperationalEvidenceProvider } from './operational-evidence.js';
+import {
+  resolveVaiOperationalRoots,
+  type VaiOperationalRoots,
+} from './operational-roots.js';
 import { registerCouncilChangelogRoutes } from './routes/council-changelog.js';
 import { registerKnowledgeGraphRoutes } from './routes/knowledge-graph.js';
 import { registerMemoryRoutes } from './routes/memory.js';
@@ -97,6 +101,8 @@ import { registerDetailedHealthRoutes } from './routes/health-detail.js';
 export interface ServerOptions {
   port?: number;
   dbPath?: string;
+  runtimeFile?: string;
+  operationalRoots?: VaiOperationalRoots;
 }
 
 export function getDefaultAllowedOrigins(port: number): string[] {
@@ -146,6 +152,10 @@ export async function createServer(options?: ServerOptions) {
 
   const port = options?.port ?? config.port;
   const dbPath = options?.dbPath ?? config.dbPath;
+  const operationalRoots = options?.operationalRoots ?? resolveVaiOperationalRoots({
+    runtimeFile: options?.runtimeFile ?? process.argv[1],
+    dbPath,
+  });
 
   const db = createDb(dbPath);
   const memoryService = new MemoryService(db);
@@ -162,7 +172,6 @@ export async function createServer(options?: ServerOptions) {
   const sshLauncher = new SshLauncher();
   const shareService = new ShareService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.shares), []));
   const linkIndexService = new LinkIndexService(new JsonStore(path.resolve(dbPath, '..', PERSISTED_NAMES.links), { objects: [], edges: [] }));
-  const detailedHealthService = new DetailedHealthService(models, environmentService);
   const hardwareModelService = new HardwareModelService();
 
   // Grok CLI / direct integration as native tool inside Vai's tool set.
@@ -263,6 +272,32 @@ export async function createServer(options?: ServerOptions) {
   );
 
   const pipeline = new IngestPipeline(db, vaiEngine);
+  const detailedHealthService = new DetailedHealthService(
+    models,
+    environmentService,
+    [
+      {
+        id: 'database',
+        label: 'Runtime database',
+        optional: false,
+        check: () => { db.run('SELECT 1'); },
+        healthyImpact: 'Persistent chat, settings, and runtime records are readable.',
+        failureImpact: 'Persistence-backed features are unavailable; in-memory UI state may still work.',
+        nextAction: 'Inspect the configured database path and SQLite error, then restore from backup if needed.',
+        evidenceRef: 'database:select-1',
+      },
+      {
+        id: 'indexer',
+        label: 'Incremental indexer',
+        optional: true,
+        check: () => pipeline.probe(),
+        healthyImpact: 'The bounded source index query is available.',
+        failureImpact: 'Workspace and retrieval indexing may be reduced; editing and chat remain available.',
+        nextAction: 'Inspect the source-index database and retry the workspace scan.',
+        evidenceRef: 'indexer:bounded-source-query',
+      },
+    ],
+  );
 
   // Knowledge hydrate is the dominant startup cost (~14s of synchronous n-gram training on
   // a 1.3k-source store) and used to block the server from listening. We now defer it: the
@@ -383,7 +418,7 @@ export async function createServer(options?: ServerOptions) {
   // Constructed before ChatService so the builder council can resolve the
   // designated project folder server-side (real files at turn time).
   const sandboxManager = new SandboxManager();
-  const operationalEvidence = createVaiOperationalEvidenceProvider(findVaiRepoRoot());
+  const operationalEvidence = createVaiOperationalEvidenceProvider(operationalRoots);
   const chatService = new ChatService(
     db,
     models,
@@ -404,7 +439,9 @@ export async function createServer(options?: ServerOptions) {
       // The Council triggering its own improvement loops: a non-ship consensus naming a
       // missingCapability enqueues a self-improvement job to the cross-process inbox the background
       // loop drains through the gated feature-review pipeline. Best-effort; never blocks a turn.
-      selfImproveQueue: createSelfImproveQueue(),
+      selfImproveQueue: createSelfImproveQueue({
+        repoRoot: operationalRoots.source.path ?? operationalRoots.userData.path,
+      }),
       councilRoster,
       visionAdapter,
       imageProducer,
@@ -687,10 +724,16 @@ export async function createServer(options?: ServerOptions) {
   registerAgentIntrospectRoutes(app, {
     models,
     fallbackChain: effectiveConfig.fallbackChain.models,
+    roots: operationalRoots,
     chatService,
     operationalEvidence,
   });
-  registerCouncilChangelogRoutes(app);
+  registerCouncilChangelogRoutes(
+    app,
+    operationalRoots.source.path
+      ? { repoRoot: operationalRoots.source.path }
+      : {},
+  );
   registerKnowledgeGraphRoutes(app, { chatService, auth: platformAuth });
   registerMemoryRoutes(app, { memory: memoryService, chatService, auth: platformAuth });
 

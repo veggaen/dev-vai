@@ -2768,3 +2768,229 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     sandboxing; public-host provisioning, TLS/custom-domain attachment, and the
     complete token-revocation UX remain deployment work rather than claimed as
     production-complete.
+
+- **PROPOSED 2026-07-23 - Staff-engineering top-ten execution portfolio**
+  - Portfolio rule: restore operational truth and a dependable release path
+    before adding more broad feature surface. Each item must open or update its
+    own design note before implementation and must retain Windows/macOS/Linux
+    behavior explicitly. The ordering below is the recommended execution order.
+  - **1. P0 - Make operational evidence truthful in source and packaged
+    runtimes.**
+    - Evidence: the live packaged `/api/agent/introspect` endpoint reported a
+      healthy `vai:v0` process while repository evidence was unavailable,
+      `docs.agentsGuide`, `docs.improvementBacklog`, and `agentTooling` were
+      `null`, and both the verification receipt and self-improvement corpus were
+      reported missing. All five artifacts exist in the source workspace. The
+      detailed health service also currently declares the runtime and indexer
+      healthy without probing them.
+    - Direction: replace `process.cwd()` inference with explicit, separately
+      modeled build-evidence, active-workspace, and user-data roots. Embed the
+      release receipt in packaged builds, preserve source/workspace absence as a
+      valid state, and derive health from real dependency probes rather than
+      constants.
+    - Acceptance: a fresh source launch and installed launch each return the
+      correct evidence provenance; the installed build identifies its exact
+      commit/receipt without pretending that a Git checkout exists; an active
+      Vai workspace reports its real branch and dirty state; the improvement
+      counts match `self-improve:status`; injected subsystem failures change
+      only the affected health rows; and the zero-model self-assessment cites
+      those timestamped sources in under two seconds.
+  - **2. P0 - Turn self-improvement from a proposal generator into a shipping
+    system.**
+    - Evidence: `self-improve:status` reported 302 queued fixes, 86 qualified
+      proposals, zero shipped improvements over 919 compute units, a stale last
+      run from 2026-07-02, a failed latest visual run, six weak classes, and
+      lessons repeated up to 1,112 times without adoption.
+    - Direction: pause net-new proposal generation while the qualified queue is
+      deduplicated and ranked; add an owner-visible adoption board with evidence,
+      risk, affected tests, assignee, expiry, and reject reason; and run one
+      bounded change through design, implementation, targeted proof, and
+      rollback at a time.
+    - Acceptance: three existing qualified proposals ship with linked commits,
+      before/after scores, tests, and visual proof; no proposal edits code
+      without review and gates; the heartbeat is less than 24 hours old during
+      an active cycle; repeated lessons collapse into one actionable item; and
+      realized compute ROI becomes non-zero before generation resumes.
+  - **3. P0 - Establish a real cross-platform desktop release train.**
+    - Evidence: `.github/workflows/release.yml` can create a tag from the root
+      package version, but the private root package currently has no `version`;
+      the workflow builds, signs, uploads, installs, or smoke-tests no desktop
+      artifact. The adoption receipt also states that macOS/Linux have no native
+      device proof.
+    - Direction: version from an explicit release manifest, build the Tauri app
+      and sidecar on Windows/macOS/Linux, attach checksums and an SBOM, add the
+      platform signing/notarization seams, and make updater rollback part of the
+      same release contract.
+    - Acceptance: one candidate tag produces three native artifacts tied to the
+      same commit; clean VMs install, launch, authenticate, answer `/health`, and
+      exercise one local composer turn; signatures/checksums are verifiable;
+      update and rollback preserve local data; and a failed platform blocks the
+      release instead of publishing a partial success silently.
+  - **4. P0 - Make CI fast, deterministic, and honestly blocking.**
+    - Evidence: scenario, performance, retrieval, live-eval, Semgrep, and browser
+      smoke steps are all advisory or `continue-on-error`; the last main
+      verification took roughly nineteen minutes; and one full-suite run hit a
+      transient `council-redraft-loop` timeout before a retry passed.
+    - Direction: create a sub-ten-minute required PR lane, a required
+      deterministic merge lane, and scheduled model/network/browser lanes.
+      Remove wall-clock sleeps from deterministic Council tests, preserve exact
+      failure artifacts, and assign every quarantined flake an owner and expiry.
+    - Acceptance: required PR checks remain below ten minutes at p95; the
+      deterministic lane passes thirty consecutive clean runs; no deterministic
+      quality gate is softened with `continue-on-error`; a deliberately broken
+      route, schema, screenshot, and performance budget each fail the owning
+      lane; and model/network absence is reported as `not-run`, never green.
+  - **5. P1 - Finish the branch and dependency migration train.**
+    - Evidence: after the branch cleanup, one valuable but dirty feature PR
+      remains alongside five intentionally quarantined major/pre-1.0 dependency
+      upgrades. Leaving them as indefinite drafts recreates the branch problem
+      and lets compatibility risk accumulate.
+    - Direction: extract the follow-up-query work into a small current-main
+      change with corpus coverage, then evaluate one dependency upgrade at a
+      time using an explicit compatibility matrix, migration note, rollback
+      plan, desktop build, and focused runtime tests. Close upgrades whose value
+      does not justify their migration cost.
+    - Acceptance: every retained PR has a merge-or-close decision and current
+      evidence; only one risky migration is active at a time; no draft sits
+      untouched for more than fourteen days; merged branches are deleted; and
+      the repository normally contains only `main` plus genuinely active work.
+  - **6. P1 - Close the capability-enforcement boundary, including legacy
+    helpers.**
+    - Evidence: the threat model honestly records that legacy filesystem,
+      browser, subprocess, and Git helpers can bypass the central dispatcher;
+      Git authority is coarse; provider CLIs lack portable OS containment;
+      installed skills lack publisher/signature verification; and processes
+      still inherit the current user's OS privilege.
+    - Direction: inventory every side-effecting call site, route it through a
+      typed dispatch policy, split Git into read/stage/commit/push/destructive
+      actions, sandbox provider processes per OS, and establish signed skill
+      provenance with explicit trust UX.
+    - Acceptance: a static boundary test rejects new direct side effects;
+      malicious repo config, README, tool output, memory, and skill fixtures
+      cannot gain shell/network/write/Git authority in restricted scopes; policy
+      denials are visible; provider escape tests run on all three desktop OSes;
+      and every remaining exception is named, scoped, and time-bounded.
+  - **7. P1 - Move render proof and effective-module resolution into the builder
+    transaction.**
+    - Evidence: `/api/agent/introspect` still describes screenshot proof as an
+      external evaluation. The open backlog also records a council edit that
+      changed a valid source file but not the module rendered by the running app,
+      so a correct diff produced no visible requested change.
+    - Direction: resolve the effective runtime module graph before editing, build
+      on a shadow port, capture console/network/render evidence, compare a
+      request-specific visual or DOM marker, and atomically retain the prior
+      working preview when proof fails.
+    - Acceptance: a sealed matrix of twenty React/Next/Vite and monorepo edits
+      proves the requested visible change, zero new console errors, and the exact
+      changed files; no turn says complete from a diff plus reachable server
+      alone; and every failed edit leaves the previous preview and unsaved
+      buffers intact.
+  - **8. P1 - Complete dictation product acceptance and the voice-accuracy
+    loop.**
+    - Evidence: automatic insertion and the Copy/Close fallback are shipped, but
+      the final real Chrome/Facebook composer hold remains a human acceptance
+      check. The voice backlog still lacks calibrated confidence, phrase
+      priming, and measured correction quality. The fullscreen-game track is
+      0/10 real runs and has a recorded input-safety incident, so it must remain
+      separately human-gated.
+    - Direction: build a safe normal-app acceptance matrix for Chromium
+      contenteditable/input, Electron, WebView, terminal, and native edit
+      controls; measure delivery reliability and latency; then add the bounded
+      accuracy coach, contextual phrasebook, and semantic-drift/WER report.
+    - Acceptance: repeated Win+Alt hold/release runs insert into the unchanged
+      focused control with no manual paste, no stray Enter, and no focus theft;
+      a no-input target alone opens the persistent Copy/Close card; clipboard
+      behavior is proven for plain and rich formats; and a fixed voice corpus
+      shows a measured accuracy improvement without silently changing meaning.
+      Game tests remain manual under the existing safety protocol.
+  - **9. P2 - Prove practical web research on a sealed global corpus, not a
+    handful of success cases.**
+    - Evidence: recent fixes passed six global shop cases and four cross-country
+      venue cases and generalized source discovery substantially. That is strong
+      feature evidence but too small to establish reliability across the full
+      hours/menu/prices/contact/address/parking/accessibility family.
+    - Direction: create a frozen fixture corpus plus a smaller live canary set
+      spanning at least twenty countries, ten languages, independent shops,
+      chains, malls, PDFs, store locators, delivery menus, ambiguous branches,
+      closures, and stale-directory conflicts. Score entity, branch, requested
+      fact shape, source provenance, freshness, and limitation honesty
+      separately.
+    - Acceptance: at least 95% requested-fact precision and 98% entity/branch
+      accuracy on the sealed set; zero unsupported mutation of times, prices, or
+      addresses; every insufficient-evidence case is explicit; Quick, Balanced,
+      and Deep preserve the same verified facts; and live-canary drift produces
+      an actionable report rather than silently updating an oracle.
+  - **10. P2 - Decompose the architectural hotspots under characterization
+    tests.**
+    - Evidence: current tracked source contains a roughly 28,000-line
+      `vai-engine.ts`, 6,100-line search pipeline, 6,000-line chat service,
+      8,700-line algorithm template module, and 3,700-line Tauri `main.rs`.
+      These files combine routing, policy, execution, and presentation concerns,
+      increasing regression and review risk.
+    - Direction: freeze behavior with route-family and performance
+      characterization tests, extract typed strategy registries and OS adapters,
+      enforce dependency direction, and add a ratcheting source-complexity budget
+      so the hotspots cannot regrow. This is a behavior-preserving program, not
+      a rewrite.
+    - Acceptance: the three largest production hotspots each shrink by at least
+      half without changing frozen reasoning fingerprints or public contracts;
+      route ownership becomes independently testable; there are no new circular
+      dependencies; targeted and full gates stay green; and p95 route/search
+      latency and packaged size regress by no more than five percent.
+
+- **SHIPPED 2026-07-23 - Staff portfolio item 1: truthful operational evidence**
+  - Root cause: the packaged sidecar inherited the install directory as its
+    working directory, while introspection inferred a source checkout from
+    `cwd/../..`. That collapsed three different trust/provenance domains into
+    one path: immutable build evidence, an optional developer checkout, and
+    mutable user data. The health surface also labeled runtime and indexer
+    healthy without asking their owning dependencies.
+  - Design and implementation: `docs/design/operational-evidence-truth.md`
+    defines the boundary. A runtime-owned resolver now discovers source only
+    from a proven runtime-module ancestor, accepts explicit roots without
+    silently replacing invalid values, and never consults the current working
+    directory. The schema-only contracts package validates the complete
+    operational snapshot. Persisted evidence names live in the constants
+    manifest. Source builds report Git/docs/receipt/live corpus; packaged builds
+    report an embedded manifest/docs/receipt while explicitly stating that no
+    Git checkout or mutable improvement corpus is attached.
+  - Packaging: every sidecar build now embeds a manifest with commit, branch,
+    dirty state, desktop version, timestamp, and verification-receipt SHA-256,
+    plus `AGENTS.md`, the tooling guide, and the backlog snapshot. The Tauri
+    launcher passes the installed evidence directory explicitly. No absolute
+    developer source path is embedded.
+  - Health: the authenticated request itself proves the runtime row; bounded
+    database and incremental-index probes prove their own rows. Injected
+    database, indexer, provider, and remote failures are contained to the owning
+    subsystem. Unwired optional services remain visibly unknown with an impact
+    and next action.
+  - Source proof: a fresh source server reported commit
+    `9118d77e3ce2a0e23b6f7c2a09e58cad8a8ba9da`, branch `main`, 27 changed
+    files, the current 5,436-test receipt, all three operational docs, and live
+    self-improvement counts of 302 queued / 86 qualified / 0 adopted / 2
+    pending nominations / 1 integrated nomination. Its stale latest run remains
+    honestly visible as `aborted-runtime-down` from 2026-07-02.
+  - Installed proof: the rebuilt packaged runtime reports version `0.2.0`, the
+    same commit, `dirty: true`, embedded receipt provenance and 5,436 passing
+    tests, packaged docs present, no invented repository, and no invented live
+    corpus. `/health` reports `ok`. The pre-commit acceptance build's release
+    and installed executables were byte-identical: `veggaai.exe`
+    `423AD8E1ADF728522B0886B8F38BB9DAF368D8E746DF0821F24FFA4ADD304842`;
+    `vai-runtime.exe`
+    `995A3FB3CEFAD590CD3F4B321532A4B9582FB9C6575320ED2E3E894CAAC3E362`.
+    Exactly one installed app and one installed sidecar were running after
+    relaunch.
+  - Gates: 331 Vitest files passed (5,436 tests; 48 skipped), the monorepo
+    typechecks and production build passed, lint passed with zero errors
+    (existing warnings only), the constants policy and Rust check passed, and a
+    post-build portability fix passed 14 focused runtime tests plus runtime
+    typecheck. Chrome visual acceptance at 1440x900 showed healthy
+    runtime/database/indexer rows and an honestly degraded overall state because
+    no language-server heartbeat exists; there were zero browser/page errors,
+    zero failed requests, and no horizontal overflow. Evidence is under
+    `.codex-run/operational-evidence-visual/`. The same health surface was then
+    opened and captured from the installed Tauri process itself at
+    `installed-native-workspace-trust.png`.
+  - Honest remaining boundary: this receipt contains native Windows proof.
+    Root/path logic uses Node and Rust platform-native path APIs, but macOS/Linux
+    native proof still belongs in staff portfolio item 3's release CI.

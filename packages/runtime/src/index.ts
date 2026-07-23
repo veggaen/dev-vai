@@ -127,7 +127,9 @@ async function main() {
     console.error('[VAI] unhandledRejection (runtime kept alive):', reason);
   });
 
-  const { app, port, vaiEngine, chatService, config, localSteeringWorker, sandboxManager, startBackgroundHydrate } = await createServer();
+  const { app, port, vaiEngine, chatService, config, localSteeringWorker, sandboxManager, startBackgroundHydrate } = await createServer({
+    runtimeFile,
+  });
   const host = resolveRuntimeHost();
   assertSecureRuntimeExposure(host, config.authEnabled && config.apiKeys.length > 0);
 

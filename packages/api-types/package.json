@@ -20,7 +20,8 @@
     "./session-responses": "./src/session-responses.ts",
     "./session-models": "./src/session-models.ts",
     "./project-responses": "./src/project-responses.ts",
-    "./adoption": "./src/adoption.ts"
+    "./adoption": "./src/adoption.ts",
+    "./operational-evidence": "./src/operational-evidence.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

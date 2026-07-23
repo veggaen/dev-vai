@@ -3,10 +3,17 @@ import Fastify from 'fastify';
 import { ModelRegistry } from '@vai/core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findVaiRepoRoot, registerAgentIntrospectRoutes } from './agent-introspect.js';
+import { registerAgentIntrospectRoutes } from './agent-introspect.js';
+import { findVaiSourceRoot, type VaiOperationalRoots } from '../operational-roots.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
+const ROOTS: VaiOperationalRoots = {
+  runtimeKind: 'source',
+  source: { path: REPO_ROOT, origin: 'explicit' },
+  buildEvidence: { origin: 'unavailable', error: 'not packaged' },
+  userData: { path: path.join(REPO_ROOT, 'Temporary_files'), origin: 'database' },
+};
 
 describe('agent introspect route', () => {
   it('exposes the offline agent tooling map and bootstrap channel', async () => {
@@ -14,21 +21,27 @@ describe('agent introspect route', () => {
     registerAgentIntrospectRoutes(app, {
       models: new ModelRegistry(),
       fallbackChain: ['vai:v0'],
-      repoRoot: REPO_ROOT,
+      roots: ROOTS,
       operationalEvidence: () => ({
+        schemaVersion: 1,
         capturedAt: '2026-07-19T07:54:13.000Z',
         runtime: { sourceId: 'runtime:process', healthy: true, engine: 'vai:v0' },
+        build: {
+          sourceId: 'build:source-git', available: true, runtimeKind: 'source',
+          commit: 'a'.repeat(40), branch: 'test', version: '0.2.0',
+          builtAt: null, dirty: true,
+        },
         repository: {
-          sourceId: 'git:status', available: true, branch: 'test',
+          sourceId: 'git:source-status', available: true, branch: 'test',
           changedFiles: 3, modifiedFiles: 2, untrackedFiles: 1,
         },
         verification: {
-          sourceId: 'verification:receipt', available: true, status: 'pass',
+          sourceId: 'verification:source-receipt', available: true, status: 'pass',
           capturedAt: '2026-07-19T07:50:00.000Z', totalTestsPassed: 1179,
           typechecks: ['@vai/core', '@vai/runtime'], stale: false,
         },
         selfImprovement: {
-          sourceId: 'self-improve:corpus', available: true, queuedFixes: 302,
+          sourceId: 'self-improve:source-corpus', available: true, queuedFixes: 302,
           qualified: 86, adopted: 0, pendingNominations: 2, integratedNominations: 1,
           latestRunStatus: 'aborted-runtime-down', latestRunAt: '2026-07-02T05:46:56.677Z',
         },
@@ -93,13 +106,13 @@ describe('agent introspect route', () => {
     expect(body.boundedReasoning?.competition?.v4SealedFingerprint).toHaveLength(64);
     expect(body.boundedReasoning?.competition?.v4Wave2Fingerprint).toHaveLength(64);
     expect(body.operationalEvidence?.selfImprovement).toMatchObject({
-      sourceId: 'self-improve:corpus',
+      sourceId: 'self-improve:source-corpus',
       adopted: 0,
     });
     expect(body.docs?.agentsGuide).toContain('Working on Vai');
   });
 
   it('finds the repo root from nested runtime paths', () => {
-    expect(findVaiRepoRoot(__dirname)).toBe(REPO_ROOT);
+    expect(findVaiSourceRoot(__dirname)).toBe(REPO_ROOT);
   });
 });

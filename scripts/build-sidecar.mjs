@@ -12,17 +12,27 @@
  *   node scripts/build-sidecar.mjs
  */
 
-import { execSync } from 'child_process';
-import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'fs';
+import { execFileSync, execSync } from 'child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { createRequire } from 'module';
 import { dirname, join, resolve } from 'path';
 
 const ROOT = resolve(import.meta.dirname, '..');
+const PLATFORM_VALUES = JSON.parse(readFileSync(
+  join(ROOT, 'packages/constants/src/platform-values.json'),
+  'utf8',
+));
+const PERSISTED_NAMES = PLATFORM_VALUES.persistedNames;
 const RUNTIME_BUNDLE = join(ROOT, 'packages/runtime/dist/bundle.cjs');
 const BINARIES_DIR = join(ROOT, 'apps/desktop/src-tauri/binaries');
 const RESOURCES_DIR = join(ROOT, 'apps/desktop/src-tauri/resources/runtime');
 const RUNTIME_DIST_DIR = join(RESOURCES_DIR, 'dist');
 const RUNTIME_NODE_MODULES_DIR = join(RESOURCES_DIR, 'node_modules');
+const RUNTIME_EVIDENCE_DIR = join(
+  RESOURCES_DIR,
+  PERSISTED_NAMES.buildEvidenceFolder,
+);
 const OUTPUT = join(BINARIES_DIR, 'vai-runtime-x86_64-pc-windows-msvc.exe');
 const require = createRequire(import.meta.url);
 const BETTER_SQLITE3_DIR = resolve(require.resolve('better-sqlite3/package.json'), '..');
@@ -150,6 +160,61 @@ if (!existsSync(BINARIES_DIR)) {
 rmSync(RESOURCES_DIR, { recursive: true, force: true });
 mkdirSync(RUNTIME_DIST_DIR, { recursive: true });
 mkdirSync(RUNTIME_NODE_MODULES_DIR, { recursive: true });
+mkdirSync(RUNTIME_EVIDENCE_DIR, { recursive: true });
+
+// Immutable operational evidence for installed runtimes. Never embed the
+// developer's absolute source path; the native launcher points at this folder.
+console.log('[sidecar] Capturing build identity and verification evidence...');
+const verificationReceiptPath = join(
+  ROOT,
+  'docs',
+  PERSISTED_NAMES.verificationReceipt,
+);
+if (!existsSync(verificationReceiptPath)) {
+  throw new Error(`verification receipt is required: ${verificationReceiptPath}`);
+}
+const verificationReceipt = readFileSync(verificationReceiptPath);
+const desktopPackage = JSON.parse(readFileSync(
+  join(ROOT, 'apps/desktop/package.json'),
+  'utf8',
+));
+const git = (...args) => execFileSync('git', args, {
+  cwd: ROOT,
+  encoding: 'utf8',
+  windowsHide: true,
+}).trim();
+const buildManifest = {
+  schemaVersion: 1,
+  commit: git('rev-parse', 'HEAD'),
+  branch: git('branch', '--show-current') || null,
+  dirty: git('status', '--porcelain', '--untracked-files=all').length > 0,
+  version: desktopPackage.version,
+  builtAt: new Date().toISOString(),
+  verificationReceiptSha256: createHash('sha256')
+    .update(verificationReceipt)
+    .digest('hex'),
+};
+copyFileSync(
+  verificationReceiptPath,
+  join(RUNTIME_EVIDENCE_DIR, PERSISTED_NAMES.verificationReceipt),
+);
+for (const [source, target] of [
+  [join(ROOT, PERSISTED_NAMES.agentsGuide), PERSISTED_NAMES.agentsGuide],
+  [join(ROOT, 'docs', PERSISTED_NAMES.agentToolingGuide), PERSISTED_NAMES.agentToolingGuide],
+  [join(ROOT, 'docs', PERSISTED_NAMES.improvementBacklog), PERSISTED_NAMES.improvementBacklog],
+]) {
+  if (!existsSync(source)) throw new Error(`build evidence document is required: ${source}`);
+  copyFileSync(source, join(RUNTIME_EVIDENCE_DIR, target));
+}
+const buildManifestPath = join(
+  RUNTIME_EVIDENCE_DIR,
+  PERSISTED_NAMES.buildManifest,
+);
+writeFileSync(
+  buildManifestPath,
+  `${JSON.stringify(buildManifest, null, 2)}\n`,
+  'utf8',
+);
 
 // 3. Copy the Node runtime binary as the sidecar executable.
 console.log('[sidecar] Copying node.exe as sidecar binary...');

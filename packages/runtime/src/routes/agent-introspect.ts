@@ -2,7 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BRAND_BLUEPRINTS } from '@vai/core';
-import type { ModelRegistry, VaiOperationalEvidenceSnapshot } from '@vai/core';
+import type { ModelRegistry } from '@vai/core';
+import { PERSISTED_NAMES } from '@vai/constants';
+import {
+  vaiOperationalEvidenceSnapshotSchema,
+  type VaiOperationalEvidenceSnapshot,
+} from '@vai/contracts/operational-evidence';
+import type { VaiOperationalRoots } from '../operational-roots.js';
 
 /**
  * Agent introspection — the machine-readable "way" for AI agents to understand
@@ -17,7 +23,7 @@ import type { ModelRegistry, VaiOperationalEvidenceSnapshot } from '@vai/core';
 export interface AgentIntrospectDeps {
   readonly models: ModelRegistry;
   readonly fallbackChain: readonly string[];
-  readonly repoRoot?: string;
+  readonly roots: VaiOperationalRoots;
   /** Same bounded evidence packet supplied to Vai's zero-model self-assessment lane. */
   readonly operationalEvidence?: () => VaiOperationalEvidenceSnapshot;
   /** Chat service for deliberation-trace parity (agents see what the UI shows). */
@@ -27,8 +33,8 @@ export interface AgentIntrospectDeps {
   };
 }
 
-function readDoc(repoRoot: string, relative: string): string | null {
-  const target = path.join(repoRoot, relative);
+function readDoc(target: string | undefined): string | null {
+  if (!target) return null;
   try {
     return existsSync(target) ? readFileSync(target, 'utf8') : null;
   } catch {
@@ -36,8 +42,8 @@ function readDoc(repoRoot: string, relative: string): string | null {
   }
 }
 
-function readJsonDoc(repoRoot: string, relative: string): unknown | null {
-  const raw = readDoc(repoRoot, relative);
+function readJsonDoc(target: string | undefined): unknown | null {
+  const raw = readDoc(target);
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -46,27 +52,28 @@ function readJsonDoc(repoRoot: string, relative: string): unknown | null {
   }
 }
 
-export function findVaiRepoRoot(start = process.cwd()): string {
-  let dir = path.resolve(start);
-  for (let i = 0; i < 8; i += 1) {
-    if (existsSync(path.join(dir, 'AGENTS.md')) && existsSync(path.join(dir, 'package.json'))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+function documentationTarget(
+  roots: VaiOperationalRoots,
+  sourceRelative: readonly string[],
+  packagedName: string,
+): string | undefined {
+  if (roots.source.path) return path.join(roots.source.path, ...sourceRelative);
+  if (roots.buildEvidence.path) {
+    return path.join(roots.buildEvidence.path, packagedName);
   }
-  return path.resolve(start, '..', '..');
+  return undefined;
 }
 
 export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentIntrospectDeps): void {
   app.get('/api/agent/introspect', async () => {
-    const repoRoot = deps.repoRoot ?? findVaiRepoRoot();
     const localIds = deps.models.listByProvider('local').map((adapter) => adapter.id);
     const councilOrder = [...new Set([...deps.fallbackChain.filter((id) => id !== 'vai:v0'), ...localIds])].slice(0, 3);
     let operationalEvidence: VaiOperationalEvidenceSnapshot | null = null;
     try {
-      operationalEvidence = deps.operationalEvidence?.() ?? null;
+      const rawEvidence = deps.operationalEvidence?.() ?? null;
+      operationalEvidence = rawEvidence
+        ? vaiOperationalEvidenceSnapshotSchema.parse(rawEvidence)
+        : null;
     } catch {
       // Introspection stays available if a bounded read fails unexpectedly.
     }
@@ -171,7 +178,11 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
         evalHarness: 'scripts/council-codegen-eval.mts',
         bootstrap: 'pnpm agent:bootstrap',
       },
-      agentTooling: readJsonDoc(repoRoot, path.join('docs', 'agent-tooling-guide.json')),
+      agentTooling: readJsonDoc(documentationTarget(
+        deps.roots,
+        ['docs', PERSISTED_NAMES.agentToolingGuide],
+        PERSISTED_NAMES.agentToolingGuide,
+      )),
       keyPaths: {
         chatPolicy: 'packages/core/src/chat/service.ts',
         dialogueState: 'packages/core/src/chat/dialogue-state.ts',
@@ -183,8 +194,21 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
         steering: 'packages/runtime/src/steering/ (being evolved into the improvement loop)',
       },
       docs: {
-        agentsGuide: readDoc(repoRoot, 'AGENTS.md'),
-        improvementBacklog: readDoc(repoRoot, path.join('docs', 'vai-improvement-backlog.md')),
+        evidenceSource: deps.roots.source.path
+          ? 'source'
+          : deps.roots.buildEvidence.path
+            ? 'packaged'
+            : 'unavailable',
+        agentsGuide: readDoc(documentationTarget(
+          deps.roots,
+          [PERSISTED_NAMES.agentsGuide],
+          PERSISTED_NAMES.agentsGuide,
+        )),
+        improvementBacklog: readDoc(documentationTarget(
+          deps.roots,
+          ['docs', PERSISTED_NAMES.improvementBacklog],
+          PERSISTED_NAMES.improvementBacklog,
+        )),
       },
     };
   });
