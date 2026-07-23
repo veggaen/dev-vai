@@ -3024,7 +3024,7 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     turns in memory. Structured outcomes drive process-tree, timeline, and
     software-work attention states; stale running frames cannot overwrite a
     terminal result.
-  - Proof: 124 focused tests and the ten-workspace monorepo typecheck pass. All
+  - Proof: 124 focused tests and all participating workspace typechecks pass. All
     5,459 repository tests executed successfully, followed by a Vitest worker
     RPC reporting timeout that left the aggregate command yellow. A real
     Balanced-mode manual stop rendered `Interrupted · work stopped before

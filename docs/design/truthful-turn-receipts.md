@@ -102,8 +102,8 @@ Out of scope:
 
 - Contract, core persistence, ownership/concurrency, desktop store, process
   tree, timeline, software-work, and turn-section tests pass: 124 focused tests.
-- The monorepo TypeScript boundary check passes across all ten participating
-  workspaces.
+- The monorepo TypeScript boundary check passes across every participating
+  TypeScript workspace.
 - The repository-wide suite executed 5,459 passing tests with 48 skipped and
   no test failures. Vitest then reported one worker RPC timeout while publishing
   task updates and exited nonzero; mission M18 owns that test-runner reliability

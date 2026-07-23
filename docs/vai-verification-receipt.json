@@ -30,7 +30,7 @@
   "checks": [
     "corepack pnpm install --offline --frozen-lockfile",
     "node node_modules/vitest/vitest.mjs run (331 files passed; 1 skipped; 5,459 tests passed; 48 skipped; aggregate exit 1 after a worker RPC timeout)",
-    "corepack pnpm -r --parallel typecheck (all 10 participating workspaces passed)",
+    "corepack pnpm -r --parallel typecheck (all participating TypeScript workspaces passed)",
     "corepack pnpm lint (0 errors; existing warnings only)",
     "node scripts/check-platform-constants.mjs",
     "node scripts/check-tauri-version-line.mjs (JavaScript 2.10.1 and Rust 2.10.3 share the 2.10 line)",
