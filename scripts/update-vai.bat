@@ -3,7 +3,7 @@ REM Double-click to rebuild + restart the VAI desktop app.
 REM Runs the repo's own updater: closes the running app, builds the Tauri
 REM bundle, syncs veggaai.exe to Documents\veggaAi, and relaunches it.
 title Update Vai
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 
 echo ============================================
 echo   Updating VAI desktop app...
