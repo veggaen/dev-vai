@@ -141,7 +141,7 @@
     "playwright": "^1.61.1",
     "postject": "1.0.0-alpha.6",
     "prettier": "^3.6.2",
-    "promptfoo": "^0.121.17",
+    "promptfoo": "^0.121.19",
     "puppeteer": "^24.37.5",
     "turbo": "^2.5.0",
     "typescript": "^5.7.0",
