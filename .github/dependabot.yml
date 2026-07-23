@@ -5,6 +5,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # The runtime JS API must stay on the Rust tauri 2.10 line. Remove this
+      # hold only in the same change that upgrades Cargo.lock and its native gate.
+      - dependency-name: "@tauri-apps/api"
+        versions: [">=2.11.0 <3"]
 
   - package-ecosystem: github-actions
     directory: /

@@ -1,0 +1,84 @@
+{
+  "ok": true,
+  "variants": [
+    {
+      "name": "compact-dark",
+      "screenshot": "docs/evidence/truthful-turn-receipts/compact-dark.png",
+      "layoutMode": "compact",
+      "theme": "dark",
+      "outcome": "interrupted",
+      "ariaLive": "polite",
+      "ariaAtomic": "true",
+      "text": "Interrupted · work stopped before completion · 3 recorded actionsShow work journal",
+      "visible": true,
+      "viewportWidth": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "name": "compact-light",
+      "screenshot": "docs/evidence/truthful-turn-receipts/compact-light.png",
+      "layoutMode": "compact",
+      "theme": "light",
+      "outcome": "interrupted",
+      "ariaLive": "polite",
+      "ariaAtomic": "true",
+      "text": "Interrupted · work stopped before completion · 3 recorded actionsShow work journal",
+      "visible": true,
+      "viewportWidth": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "name": "open-dark",
+      "screenshot": "docs/evidence/truthful-turn-receipts/open-dark.png",
+      "layoutMode": "open",
+      "theme": "dark",
+      "outcome": "interrupted",
+      "ariaLive": "polite",
+      "ariaAtomic": "true",
+      "text": "Interrupted · work stopped before completion · 3 recorded actionsShow work journal",
+      "visible": true,
+      "viewportWidth": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "name": "open-light",
+      "screenshot": "docs/evidence/truthful-turn-receipts/open-light.png",
+      "layoutMode": "open",
+      "theme": "light",
+      "outcome": "interrupted",
+      "ariaLive": "polite",
+      "ariaAtomic": "true",
+      "text": "Interrupted · work stopped before completion · 3 recorded actionsShow work journal",
+      "visible": true,
+      "viewportWidth": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "name": "odyssey-dark",
+      "screenshot": "docs/evidence/truthful-turn-receipts/odyssey-dark.png",
+      "layoutMode": "odyssey",
+      "theme": "dark",
+      "outcome": "interrupted",
+      "ariaLive": "polite",
+      "ariaAtomic": "true",
+      "text": "Interrupted · work stopped before completion · 3 recorded actionsShow work journal",
+      "visible": true,
+      "viewportWidth": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "name": "odyssey-light",
+      "screenshot": "docs/evidence/truthful-turn-receipts/odyssey-light.png",
+      "layoutMode": "odyssey",
+      "theme": "light",
+      "outcome": "interrupted",
+      "ariaLive": "polite",
+      "ariaAtomic": "true",
+      "text": "Interrupted · work stopped before completion · 3 recorded actionsShow work journal",
+      "visible": true,
+      "viewportWidth": 1440,
+      "scrollWidth": 1440
+    }
+  ],
+  "browserErrors": []
+}

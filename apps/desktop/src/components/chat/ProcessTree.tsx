@@ -118,14 +118,33 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
 
   if (!hasNodes && phase === 'settled') return null;
 
-  const summary = buildSummaryLine(nodes, durationMs);
+  const terminalStep = [...steps].reverse().find((step) => step.stage === 'turn-terminal');
+  const adverseTerminal = terminalStep?.outcome === 'failed'
+    || terminalStep?.outcome === 'interrupted'
+    || terminalStep?.outcome === 'withheld'
+    || terminalStep?.outcome === 'not-run';
+  const workNodes = nodes.filter((node) => node.id !== 'step-turn-terminal');
+  const summary = adverseTerminal && terminalStep
+    ? [
+      terminalStep.label,
+      workNodes.length > 0 ? buildSummaryLine(workNodes, durationMs) : undefined,
+    ].filter(Boolean).join(' · ')
+    : buildSummaryLine(nodes, durationMs);
   const spectrum = buildTimeSpectrum(steps);
   const showExpandedTree = phase === 'live' || phase === 'settling' || (phase === 'settled' && open);
   const treeLive = phase === 'live';
   const settledExpanded = phase === 'settled' && open;
 
   return (
-    <div className="mb-3 text-[12px]" data-testid="process-tree" data-live={treeLive ? '1' : '0'} data-phase={phase}>
+    <div
+      className="mb-3 text-[12px]"
+      data-testid="process-tree"
+      data-live={treeLive ? '1' : '0'}
+      data-phase={phase}
+      data-outcome={terminalStep?.outcome ?? (treeLive ? 'working' : 'complete')}
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <AnimatePresence initial={false}>
         {(phase === 'settled' || phase === 'settling') && (
           <motion.button
@@ -140,7 +159,7 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
             className="group mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[color:var(--chat-muted)] transition-colors thinking-hover hover:text-[color:var(--chat-body)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
           >
             <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
-            <VaiNode state="done" size={9} />
+            <VaiNode state={adverseTerminal ? 'error' : 'done'} size={9} />
             <span className="min-w-0 flex-1 truncate text-[11px]">{summary}</span>
             <TimeSpectrum segments={spectrum} />
             {summaryDuration !== undefined && (

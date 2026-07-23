@@ -1,6 +1,7 @@
 import type { ModelCapabilities, ModelCost, ProviderId } from '../config/types.js';
 import type { ChatTurnKind } from '../chat/turn-kind.js';
 import type { CouncilThinking } from '../consensus/types.js';
+import type { ProgressOutcome } from '@vai/contracts/chat-ws';
 
 // ── Messages ──
 
@@ -143,6 +144,8 @@ export interface ChatChunk {
     | 'image_progress'
     | 'image_result'
     | 'ide_event';
+  /** Semantic terminal result carried by `done`; lifecycle completion alone is not success. */
+  readonly turnOutcome?: ProgressOutcome;
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   /** Live WORK PRODUCT (not hidden thought): Vai's in-review DRAFT answer as it is written,
@@ -174,6 +177,10 @@ export interface ChatChunk {
     readonly label: string;
     readonly detail?: string;
     readonly status: 'running' | 'done';
+    /** Semantic result. Lifecycle `done` alone is retained only for wire compatibility. */
+    readonly outcome?: ProgressOutcome;
+    /** Stable receipt identity across live and persisted views. */
+    readonly evidenceId?: string;
     /** Wall-clock cost of the step, attached when the stage settles. */
     readonly durationMs?: number;
     readonly councilMembers?: readonly {
@@ -206,6 +213,8 @@ export interface ChatChunk {
       readonly id: string;
       readonly name: string;
       readonly status: 'running' | 'done' | 'failed';
+      readonly outcome?: ProgressOutcome;
+      readonly evidenceId?: string;
       readonly success?: boolean;
       readonly durationMs?: number;
       readonly input?: string;
@@ -216,6 +225,8 @@ export interface ChatChunk {
      *  base draft for the approval-gate rounds. Mirrors api-types draftRaceProgressSchema. */
     readonly draftRace?: {
       readonly status: 'drafting' | 'voting' | 'decided';
+      readonly outcome?: ProgressOutcome;
+      readonly evidenceId?: string;
       readonly candidates: readonly {
         readonly authorId: string;
         readonly authorName: string;

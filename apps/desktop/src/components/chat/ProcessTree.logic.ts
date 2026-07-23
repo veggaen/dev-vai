@@ -543,7 +543,11 @@ function mapToolRuns(
       label: 'Tool event',
       kind: 'tool-event',
       note: formatToolEvent(run, operation),
-      status: run.status === 'failed' || run.success === false ? 'bad' : run.status === 'running' ? 'running' : 'done',
+      status: hasAdverseOutcome(run.outcome) || run.status === 'failed' || run.success === false
+        ? 'bad'
+        : run.status === 'running'
+          ? 'running'
+          : 'done',
       tone: 'tool',
       children: [],
     });
@@ -553,7 +557,7 @@ function mapToolRuns(
         label: 'Tool response',
         kind: 'tool-response',
         note: run.output.trim(),
-        status: run.success === false ? 'bad' : 'done',
+        status: hasAdverseOutcome(run.outcome) || run.success === false ? 'bad' : 'done',
         tone: 'tool',
         children: [],
       });
@@ -565,9 +569,13 @@ function mapToolRuns(
       detail: run.status === 'running'
         ? `${operation} · running…`
         : run.durationMs !== undefined
-          ? `${operation} · ${run.success === false ? 'failed' : 'ok'} · ${run.durationMs}ms`
-          : `${operation} · ${run.status}`,
-      status: run.status === 'running' ? 'running' : run.success === false ? 'bad' : 'done',
+          ? `${operation} · ${hasAdverseOutcome(run.outcome) || run.success === false ? run.outcome ?? 'failed' : 'ok'} · ${run.durationMs}ms`
+          : `${operation} · ${run.outcome ?? run.status}`,
+      status: hasAdverseOutcome(run.outcome) || run.success === false || run.status === 'failed'
+        ? 'bad'
+        : run.status === 'running'
+          ? 'running'
+          : 'done',
       tone: 'tool',
       children,
     };
@@ -592,9 +600,18 @@ function formatToolEvent(
     `Tool: ${run.name}`,
     `Kind: ${operation}`,
     `Status: ${run.status}`,
+    run.outcome ? `Outcome: ${run.outcome}` : undefined,
+    run.evidenceId ? `Evidence: ${run.evidenceId}` : undefined,
     run.success !== undefined ? `Success: ${run.success ? 'yes' : 'no'}` : undefined,
     run.durationMs !== undefined ? `Duration: ${run.durationMs}ms` : undefined,
   ].filter(Boolean).join('\n');
+}
+
+function hasAdverseOutcome(outcome: ChatProgressStep['outcome']): boolean {
+  return outcome === 'failed'
+    || outcome === 'interrupted'
+    || outcome === 'withheld'
+    || outcome === 'not-run';
 }
 
 function isCouncilReviewStage(stage: string): boolean {
@@ -636,7 +653,11 @@ export function buildProcessTree(
       shortLabel: shortLabelForStage(step.stage, step.label),
       detail: isShortDetail ? detail : undefined,
       note: !isShortDetail && !step.processLog?.length && !step.toolRuns?.length ? detail : undefined,
-      status: step.status === 'running' ? 'running' : 'done',
+      status: hasAdverseOutcome(step.outcome)
+        ? 'bad'
+        : step.status === 'running'
+          ? 'running'
+          : 'done',
       tone,
       children: [],
     };

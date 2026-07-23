@@ -52,6 +52,10 @@ export function SoftwareWorkProgress({ live, steps, durationMs, outputFileCount 
     [steps, live, durationMs, outputFileCount],
   );
   const [expanded, setExpanded] = useState(live);
+  const adverseOutcome = view.outcome === 'failed'
+    || view.outcome === 'interrupted'
+    || view.outcome === 'withheld'
+    || view.outcome === 'not-run';
 
   useEffect(() => {
     setExpanded(live);
@@ -63,9 +67,10 @@ export function SoftwareWorkProgress({ live, steps, durationMs, outputFileCount 
       data-testid="software-work-progress"
       data-live={live ? '1' : '0'}
       data-expanded={expanded ? '1' : '0'}
-      data-outcome={view.withheld ? 'withheld' : live ? 'working' : 'complete'}
+      data-outcome={view.outcome ?? (view.withheld ? 'withheld' : live ? 'working' : 'complete')}
       aria-label="Software work progress"
-      aria-live={live ? 'polite' : undefined}
+      aria-live="polite"
+      aria-atomic="true"
     >
       {live ? (
         <div className="software-work-customer-status">
@@ -87,7 +92,7 @@ export function SoftwareWorkProgress({ live, steps, durationMs, outputFileCount 
           onClick={() => setExpanded((open) => !open)}
           aria-expanded={expanded}
         >
-          {view.withheld
+          {view.withheld || adverseOutcome
             ? <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             : <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
           <span className="min-w-0 flex-1 truncate">{view.summary}</span>

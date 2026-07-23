@@ -80,4 +80,41 @@ describe('TurnProcessSection', () => {
     expect(html).toContain('Council R2');
     expect(html.indexOf('Council R1')).toBeLessThan(html.indexOf('Council R2'));
   });
+
+  it('leads a settled general trace with its adverse terminal result', () => {
+    const steps: ChatProgressStep[] = [
+      { stage: 'search', label: 'Searching sources', status: 'done', outcome: 'succeeded', evidenceId: 'proof:search' },
+      {
+        stage: 'turn-terminal',
+        label: 'Turn interrupted',
+        status: 'done',
+        outcome: 'interrupted',
+        evidenceId: 'progress:terminal:turn',
+      },
+    ];
+
+    const html = renderToStaticMarkup(<ProcessTree steps={steps} />);
+    expect(html).toContain('data-outcome="interrupted"');
+    expect(html).toContain('data-vai-node="error"');
+    expect(html).toContain('Turn interrupted');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('aria-atomic="true"');
+  });
+
+  it('keeps a settled software result in the screen-reader live region', () => {
+    const steps: ChatProgressStep[] = [{
+      stage: 'turn-terminal',
+      label: 'Output withheld',
+      status: 'done',
+      outcome: 'withheld',
+      evidenceId: 'progress:terminal:turn',
+    }];
+
+    const html = renderToStaticMarkup(
+      <TurnProcessSection isStreaming={false} steps={steps} workKind="software" />,
+    );
+    expect(html).toContain('data-outcome="withheld"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('aria-atomic="true"');
+  });
 });

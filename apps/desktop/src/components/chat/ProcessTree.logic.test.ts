@@ -436,3 +436,28 @@ describe('buildTimeSpectrum — the settled "where did the time go" strip', () =
     expect(buildTimeSpectrum([step('search', 2000)])).toEqual([]);
   });
 });
+
+describe('buildProcessTree — truthful terminal outcomes', () => {
+  it('renders failed steps and interrupted tools as bad even when lifecycle is done', () => {
+    const nodes = buildProcessTree([{
+      stage: 'verify',
+      label: 'Verification stopped',
+      status: 'done',
+      outcome: 'failed',
+      evidenceId: 'progress:1:verify',
+      toolRuns: [{
+        id: 't1',
+        name: 'typecheck',
+        status: 'done',
+        outcome: 'interrupted',
+        evidenceId: 'progress:1:verify:tool:t1',
+      }],
+    }]);
+
+    expect(nodes[0]?.status).toBe('bad');
+    const tool = nodes[0]?.children.find((child) => child.kind === 'tool');
+    expect(tool?.status).toBe('bad');
+    expect(tool?.children.find((child) => child.kind === 'tool-event')?.note).toContain('Outcome: interrupted');
+    expect(tool?.children.find((child) => child.kind === 'tool-event')?.note).toContain('Evidence: progress:1:verify:tool:t1');
+  });
+});

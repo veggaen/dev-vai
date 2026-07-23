@@ -79,6 +79,20 @@ describe('buildTimelineModel', () => {
     expect(model.approved).toBe(true);
     expect(model.rounds).toBe(1);
   });
+
+  it('uses structured outcomes instead of optimistic detail-text inference', () => {
+    const model = buildTimelineModel([{
+      stage: 'verify',
+      label: 'Verification finished',
+      detail: 'Everything looked normal before the connection ended.',
+      status: 'done',
+      outcome: 'interrupted',
+    }]);
+
+    expect(model.approved).toBe(false);
+    expect(model.phases[0]?.status).toBe('bad');
+    expect(model.phases[0]?.gate?.approved).toBe(false);
+  });
 });
 
 

@@ -101,7 +101,14 @@ import {
   type ProcessLogEntry,
 } from './council-process-log.js';
 import { buildCouncilAuditMeta, withCouncilAuditVisibility } from './council-audit-meta.js';
-import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace, type ChatProgressStep } from './progress-trace.js';
+import {
+  accumulateProgressStep,
+  serializeProgressTrace,
+  deserializeProgressTrace,
+  resolveProgressTraceOwner,
+  type ChatProgressStep,
+  type TurnProgressOutcome,
+} from './progress-trace.js';
 import { buildSearchProcessLog } from './search-process-log.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
@@ -1417,7 +1424,12 @@ export class ChatService {
         content: reason, modelId: producer.id, durationMs, createdAt: new Date(),
       }).run();
       yield { type: 'text_delta', textDelta: reason } as ChatChunk;
-      yield { type: 'done', modelId: producer.id, durationMs } as ChatChunk;
+      yield {
+        type: 'done',
+        modelId: producer.id,
+        durationMs,
+        turnOutcome: 'withheld',
+      } as ChatChunk;
       return;
     }
 
@@ -2883,30 +2895,56 @@ export class ChatService {
     // blob and the client tree both speak); the adapter's readonly progress shape
     // is structurally identical, so the cast at the boundary is sound.
     let trace: ChatProgressStep[] = [];
+    let turnOutcome: TurnProgressOutcome = 'interrupted';
     let resolvedConversationId = conversationIdParam;
-    for await (const chunk of this.sendMessageInner(
-      conversationIdParam, content, image, systemPrompt, noLearn, promptRewriteOverrides, autoCreateOptions,
-    )) {
-      // Track the real conversation id (auto-create can swap it mid-turn).
-      if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
-        resolvedConversationId = chunk.conversationId;
-      }
-      if (chunk.type === 'progress' && chunk.progress) {
-        trace = accumulateProgressStep(trace, chunk.progress);
-      }
-      yield chunk;
-    }
-
-    // `sendMessageInner` writes the assistant row *after* yielding its terminal
-    // `done` chunk. Persisting from inside the loop therefore targeted the previous
-    // assistant row and made one turn display the next turn's evidence. Waiting for
-    // the generator to finish gives us the row that actually belongs to this trace.
+    let streamedAssistantText = '';
+    let responseModelId: string | undefined;
+    const turnStartedAt = Date.now();
+    const previousAssistantIds = this.assistantMessageIds(conversationIdParam);
     try {
-      const blob = serializeProgressTrace(trace);
-      if (blob) this.persistProgressTrace(resolvedConversationId, blob);
-    } catch (err) {
-      // Best-effort: trace persistence must never break a completed turn.
-      console.warn('[chat-service] progress trace persist failed:', err);
+      for await (const chunk of this.sendMessageInner(
+        conversationIdParam, content, image, systemPrompt, noLearn, promptRewriteOverrides, autoCreateOptions,
+      )) {
+        // Track the real conversation id (auto-create can swap it mid-turn).
+        if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
+          resolvedConversationId = chunk.conversationId;
+        }
+        if (chunk.type === 'progress' && chunk.progress) {
+          trace = accumulateProgressStep(trace, chunk.progress);
+        }
+        if (chunk.type === 'text_delta' && chunk.textDelta) {
+          streamedAssistantText += chunk.textDelta;
+        }
+        if (chunk.modelId) responseModelId = chunk.modelId;
+        if (chunk.type === 'done') turnOutcome = chunk.turnOutcome ?? 'succeeded';
+        yield chunk;
+      }
+    } catch (error) {
+      const cancelled = autoCreateOptions?.signal?.aborted
+        || (error instanceof Error && error.name === 'AbortError');
+      turnOutcome = cancelled ? 'interrupted' : 'failed';
+      throw error;
+    } finally {
+      // `sendMessageInner` writes the assistant row *after* yielding its terminal
+      // `done` chunk. Waiting for the generator to finish gives us the row that
+      // belongs to this trace. The pre-turn id prevents an exception or cancellation
+      // with no new row from attaching this turn's evidence to the previous answer.
+      try {
+        const blob = serializeProgressTrace(trace, turnOutcome);
+        if (blob) {
+          this.persistOwnedProgressTrace(
+            resolvedConversationId,
+            blob,
+            resolvedConversationId === conversationIdParam ? previousAssistantIds : new Set<string>(),
+            streamedAssistantText,
+            responseModelId,
+            turnStartedAt,
+          );
+        }
+      } catch (err) {
+        // Best-effort: trace persistence must never break a completed turn.
+        console.warn('[chat-service] progress trace persist failed:', err);
+      }
     }
   }
 
@@ -2915,16 +2953,62 @@ export class ChatService {
    * conversation (the row this turn just inserted). Scoped to assistant rows and
    * ordered by creation so it cannot clobber an earlier turn.
    */
-  private persistProgressTrace(conversationId: string, blob: string): void {
-    const latest = this.db
+  private assistantMessageIds(conversationId: string): Set<string> {
+    const rows = this.db
       .select({ id: messages.id })
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+      .all();
+    return new Set(rows.map((row) => row.id));
+  }
+
+  private persistOwnedProgressTrace(
+    conversationId: string,
+    blob: string,
+    previousAssistantIds: ReadonlySet<string>,
+    streamedAssistantText: string,
+    modelId: string | undefined,
+    turnStartedAt: number,
+  ): void {
+    const candidates = this.db
+      .select({ id: messages.id, content: messages.content })
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
       .orderBy(desc(messages.createdAt))
-      .limit(1)
-      .get();
-    if (!latest) return;
-    this.db.update(messages).set({ progressTrace: blob }).where(eq(messages.id, latest.id)).run();
+      .all()
+      .filter((row) => !previousAssistantIds.has(row.id));
+    const owner = resolveProgressTraceOwner(candidates, streamedAssistantText);
+    if (owner.kind === 'update') {
+      this.db.update(messages)
+        .set({ progressTrace: blob })
+        .where(eq(messages.id, owner.id))
+        .run();
+      return;
+    }
+    if (owner.kind === 'insert') {
+      // Cancellation/error may end before the normal assistant insert. Preserve
+      // the partial answer plus its terminal receipt as one durable row rather
+      // than mutating the preceding turn or losing the stop/error on reload.
+      this.db.insert(messages).values({
+        id: ulid(),
+        conversationId,
+        role: 'assistant',
+        content: streamedAssistantText,
+        modelId,
+        durationMs: Math.max(0, Date.now() - turnStartedAt),
+        progressTrace: blob,
+        createdAt: new Date(),
+      }).run();
+      return;
+    }
+
+    // Multiple new rows, or a non-matching new row, means another turn may have
+    // completed concurrently. Missing evidence is safer than cross-turn evidence.
+    console.warn('[chat-service] progress trace ownership ambiguous; persistence skipped', {
+      conversationId,
+      candidateCount: candidates.length,
+      hasStreamedText: Boolean(streamedAssistantText),
+    });
   }
 
   private async *sendMessageInner(
@@ -5276,6 +5360,7 @@ export class ChatService {
         let councilFreshBuildRejected = false;
         let councilFreshBuildUnsafeReason: string | null = null;
         let terminalCouncilEditRefusal = false;
+        let builderOutputWithheld = false;
         let councilGenerationStarted = false;
         console.log(`[builder-arm] isBuilderMode=${isBuilderMode} mode=${resolvedMode} turnKind=${turnKind} councilFlag=${process.env.VAI_COUNCIL_CODEGEN !== '0'} brief=${JSON.stringify(content.slice(0, 60))}`);
         if (isBuilderMode
@@ -5495,7 +5580,12 @@ export class ChatService {
             ? `No project was created. Vai withheld this build because validation still failed: ${compactReason}${reason.length > compactReason.length ? '…' : ''} Open the work journal for the failed checks.`
             : `No project changes were applied. Vai withheld this edit because validation still failed: ${compactReason}${reason.length > compactReason.length ? '…' : ''} Open the work journal for the failed checks.`;
           councilResult = {
-            chunks: [{ type: 'done', usage: { promptTokens: 0, completionTokens: 0 }, durationMs: 0 } as ChatChunk],
+            chunks: [{
+              type: 'done',
+              usage: { promptTokens: 0, completionTokens: 0 },
+              durationMs: 0,
+              turnOutcome: 'withheld',
+            } as ChatChunk],
             sourceChunks: [],
             text,
             durationMs: 0,
@@ -5641,6 +5731,7 @@ export class ChatService {
             }
           }
           if (gateErrors.length > 0) {
+            builderOutputWithheld = true;
             fbText = [
               `I attempted this build but the result did not meet the quality bar (${gateErrors.slice(0, 2).join('; ')}), so I did not apply it — your preview is unchanged.`,
               '',
@@ -5956,6 +6047,11 @@ export class ChatService {
             ...chunk,
             modelId: usedConservativeQualityFallback ? responseModelId : chunk.modelId ?? responseModelId,
             thinking: fallbackThinking,
+            turnOutcome: terminalCouncilEditRefusal
+              || builderOutputWithheld
+              || fbVerdict?.action === 'decline'
+              ? 'withheld'
+              : chunk.turnOutcome,
           }
           : chunk;
 

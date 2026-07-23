@@ -135,4 +135,49 @@ describe('buildSoftwareWorkView', () => {
     expect(view.journal[0]?.detail).toContain('strict file-output contract');
     expect(view.journal[0]?.detail).not.toContain('format-contract-risk');
   });
+
+  it('reports interrupted work from the terminal receipt and excludes it from action counts', () => {
+    const view = buildSoftwareWorkView({
+      live: false,
+      steps: [
+        { stage: 'workspace', label: 'Read files', status: 'done', outcome: 'succeeded' },
+        { stage: 'council-code', label: 'Editing files', status: 'done', outcome: 'interrupted' },
+        {
+          stage: 'turn-terminal',
+          label: 'Turn interrupted',
+          status: 'done',
+          outcome: 'interrupted',
+          evidenceId: 'progress:terminal:turn',
+        },
+      ],
+    });
+
+    expect(view.summary).toBe('Interrupted · work stopped before completion · 2 recorded actions');
+    expect(view.outcome).toBe('interrupted');
+    expect(view.observableActionCount).toBe(2);
+    expect(view.phases.find((phase) => phase.id === 'build')?.status).toBe('attention');
+  });
+
+  it('labels an interrupted tool honestly in the work journal', () => {
+    const view = buildSoftwareWorkView({
+      live: false,
+      steps: [{
+        stage: 'verify',
+        label: 'Checking',
+        status: 'done',
+        outcome: 'interrupted',
+        toolRuns: [{
+          id: 't1',
+          name: 'typecheck',
+          status: 'done',
+          outcome: 'interrupted',
+        }],
+      }],
+    });
+
+    expect(view.journal[0]?.notes[0]).toMatchObject({
+      label: 'typecheck — interrupted',
+      status: 'failed',
+    });
+  });
 });

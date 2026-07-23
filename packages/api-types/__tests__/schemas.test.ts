@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { chatProgressStepSchema, chatWebSocketInboundSchema } from '../src/chat-ws.js';
+import {
+  chatProgressStepSchema,
+  chatWebSocketInboundSchema,
+  chatWebSocketOutboundSchema,
+} from '../src/chat-ws.js';
 import {
   createConversationBodySchema,
   patchConversationBodySchema,
@@ -119,6 +123,44 @@ describe('chatProgressStepSchema', () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('validates semantic outcomes and stable evidence ids at the wire boundary', () => {
+    const valid = chatProgressStepSchema.safeParse({
+      stage: 'verify',
+      label: 'Verification stopped',
+      status: 'done',
+      outcome: 'interrupted',
+      evidenceId: 'progress:3:verify',
+      toolRuns: [{
+        id: 'typecheck-1',
+        name: 'typecheck',
+        status: 'failed',
+        outcome: 'failed',
+        evidenceId: 'progress:3:verify:tool:typecheck-1',
+      }],
+    });
+    expect(valid.success).toBe(true);
+
+    const invalid = chatProgressStepSchema.safeParse({
+      stage: 'verify',
+      label: 'Verification stopped',
+      status: 'done',
+      outcome: 'maybe',
+    });
+    expect(invalid.success).toBe(false);
+  });
+
+  it('carries the semantic terminal result independently of transport completion', () => {
+    expect(chatWebSocketOutboundSchema.safeParse({
+      type: 'done',
+      turnOutcome: 'withheld',
+      durationMs: 120,
+    }).success).toBe(true);
+    expect(chatWebSocketOutboundSchema.safeParse({
+      type: 'done',
+      turnOutcome: 'unknown',
+    }).success).toBe(false);
   });
 });
 

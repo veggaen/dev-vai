@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check Tauri runtime version line
+        run: pnpm check:tauri-line
+
       - name: Platform audit
         run: pnpm audit:platform
 
@@ -250,6 +253,29 @@ jobs:
           curl -fsS http://localhost:5173 >/dev/null
 
           node scripts/test-builder-dashboard-e2e.mjs
+
+  tauri-native-contract:
+    name: Tauri native contract (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check JavaScript and Rust Tauri version line
+        run: node scripts/check-tauri-version-line.mjs
+
+      - name: Check native desktop target
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --bin veggaai
 
   build:
     name: Build (Node ${{ matrix.node-version }})

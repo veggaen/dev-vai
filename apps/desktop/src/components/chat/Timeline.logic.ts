@@ -117,6 +117,13 @@ function roundForStage(stage: string): number {
   return 1;
 }
 
+function hasAdverseOutcome(outcome: ChatProgressStep['outcome']): boolean {
+  return outcome === 'failed'
+    || outcome === 'interrupted'
+    || outcome === 'withheld'
+    || outcome === 'not-run';
+}
+
 function gateForStep(step: ChatProgressStep): TimelineGate | undefined {
   const members = step.councilMembers ?? [];
   if (step.stage.startsWith('council') && members.length > 0) {
@@ -135,7 +142,8 @@ function gateForStep(step: ChatProgressStep): TimelineGate | undefined {
     };
   }
   if (step.stage === 'quality-check' || step.stage === 'verify') {
-    const bad = step.status !== 'running' && /fail|reject|decline|insufficient/i.test(step.detail ?? '');
+    const bad = hasAdverseOutcome(step.outcome)
+      || (step.status !== 'running' && /fail|reject|decline|insufficient/i.test(step.detail ?? ''));
     return {
       kind: 'quality',
       approved: !bad,
@@ -210,7 +218,11 @@ export function buildTimelineModel(
       phase: gate ? 'gate' : phaseId,
       title: gate ? PHASE_TITLE.gate : PHASE_TITLE[phaseId],
       summary: gate ? gate.reason : summarizeNodes(nodes, step.label),
-      status: step.status === 'running' ? 'running' : gate && !gate.approved ? 'bad' : 'done',
+      status: hasAdverseOutcome(step.outcome) || (gate && !gate.approved)
+        ? 'bad'
+        : step.status === 'running'
+          ? 'running'
+          : 'done',
       round,
       gate,
       nodes,
@@ -218,7 +230,8 @@ export function buildTimelineModel(
     });
   });
 
-  const approved = lastGate ? lastGate.approved : true;
+  const approved = !enriched.some((step) => hasAdverseOutcome(step.outcome))
+    && (lastGate ? lastGate.approved : true);
 
   return {
     phases,

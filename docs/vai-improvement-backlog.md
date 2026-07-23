@@ -2994,3 +2994,57 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   - Honest remaining boundary: this receipt contains native Windows proof.
     Root/path logic uses Node and Rust platform-native path APIs, but macOS/Linux
     native proof still belongs in staff portfolio item 3's release CI.
+
+- **PROPOSED 2026-07-23 - Engineering-company portfolio: 20 missions**
+  - Three independent senior reviews plus the live Vai operator/platform audit
+    produced a dependency-ordered portfolio spanning process truth,
+    self-improvement adoption, local authority, model-context security,
+    persistence, capability and provider containment, durable sessions,
+    cross-platform paths, incremental indexing, conversation carry, rendered
+    builder proof, global web research, dictation, voice accuracy, governed
+    memory/personas, accessibility, CI/performance, native releases, and
+    observability/recovery.
+  - The full evidence, owner, dependency, measurable acceptance, risk, and
+    delivery-wave record is `docs/design/staff-company-portfolio-20.md`.
+  - WIP rule: one mutating P0 at a time, with read-only/disjoint verification
+    parallelized. M01, truthful turn receipts, starts first because later quality
+    gates and dashboards cannot be trusted while interrupted work can reload as
+    completed. Its implementation note is
+    `docs/design/truthful-turn-receipts.md`.
+
+- **SHIPPED 2026-07-23 - M01 truthful turn receipts**
+  - Added schema-validated semantic outcomes (`succeeded`, `failed`,
+    `interrupted`, `withheld`, `not-run`) and stable evidence IDs for progress
+    steps, tool runs, and draft races without breaking the existing lifecycle
+    field.
+  - Version-3 trace persistence records terminal truth, remains compatible with
+    version 2, refuses malformed version-3 evidence, and cannot attach a
+    cancelled/throwing turn's trace to the previous assistant row.
+  - The desktop finalizes normal, failed, disconnected, and manually stopped
+    turns in memory. Structured outcomes drive process-tree, timeline, and
+    software-work attention states; stale running frames cannot overwrite a
+    terminal result.
+  - Proof: 124 focused tests and the ten-workspace monorepo typecheck pass. All
+    5,459 repository tests executed successfully, followed by a Vitest worker
+    RPC reporting timeout that left the aggregate command yellow. A real
+    Balanced-mode manual stop rendered `Interrupted · work stopped before
+    completion` with an attention icon, `STOPPED · NOT APPLIED` draft state,
+    and zero browser console errors. See
+    `docs/design/truthful-turn-receipts.md`.
+  - Cross-mode visual proof: Compact, Open, and Odyssey each passed in light and
+    dark at 1440x900 with structured interrupted state, accessible live-region
+    attributes, zero overflow, and zero browser/page errors. Evidence:
+    `docs/evidence/truthful-turn-receipts/`.
+
+- **SHIPPED 2026-07-23 - Native Tauri version-line integrity**
+  - The supported updater exposed a Rust 2.10.3 / JavaScript 2.11.1 Tauri
+    runtime-boundary mismatch. The API package is now pinned to published
+    2.10.1 rather than bypassing Tauri's compatibility check.
+  - Contracts, core, and desktop typechecks pass; the release executable and
+    runtime sidecar built and synced; `/health` is `ok`; packaged evidence is
+    truthful; exactly one installed desktop and sidecar process are running.
+  - The installed UI passed 4/4 WebView2 smoke checks with zero page errors.
+  - A deterministic version-line guard runs locally and in CI, Dependabot is
+    held below JavaScript API 2.11 until Rust moves deliberately, and a Windows
+    CI job now runs the native Cargo contract.
+    Design and proof: `docs/design/tauri-version-line-alignment.md`.

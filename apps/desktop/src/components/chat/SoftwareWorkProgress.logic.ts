@@ -46,6 +46,7 @@ export interface SoftwareWorkView {
   readonly outputFileCount: number;
   readonly observableActionCount: number;
   readonly withheld: boolean;
+  readonly outcome?: ChatProgressStep['outcome'];
   readonly summary: string;
 }
 
@@ -104,6 +105,13 @@ function normalize(value: string | undefined, limit = 900): string | undefined {
   return clean.length <= limit ? clean : `${clean.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
+function hasAdverseOutcome(outcome: ChatProgressStep['outcome']): boolean {
+  return outcome === 'failed'
+    || outcome === 'interrupted'
+    || outcome === 'withheld'
+    || outcome === 'not-run';
+}
+
 function issueCountFrom(steps: readonly ChatProgressStep[]): number {
   let count = 0;
   for (const step of steps) {
@@ -139,6 +147,8 @@ function friendlyAdvisorDetail(value: string | undefined): string | undefined {
 function isWithheldOutcome(steps: readonly ChatProgressStep[]): boolean {
   let terminal: boolean | undefined;
   for (const step of steps) {
+    if (step.outcome === 'withheld') terminal = true;
+    if (step.outcome === 'succeeded' && step.stage === 'turn-terminal') terminal = false;
     const text = `${step.label} ${step.detail ?? ''}`;
     if (/\b(?:edit withheld|withheld|blocked|refused)\b/i.test(text)) terminal = true;
     if (/\b(?:applying targeted edit|applied (?:the )?(?:edit|change)|files? updated|project update complete)\b/i.test(text)) terminal = false;
@@ -214,11 +224,12 @@ function notesForStep(step: ChatProgressStep): WorkJournalNote[] {
   for (const run of step.toolRuns ?? []) {
     const input = normalize(run.input, 500);
     const output = normalize(run.output, 700);
+    const runOutcome = run.outcome ?? (run.status === 'done' ? 'succeeded' : run.status);
     notes.push({
       kind: 'tool',
-      label: `${run.name} — ${run.status === 'done' ? 'completed' : run.status}`,
+      label: `${run.name} — ${runOutcome === 'succeeded' ? 'completed' : runOutcome}`,
       body: [input ? `Input: ${input}` : '', output ? `Output: ${output}` : ''].filter(Boolean).join(' · ') || undefined,
-      status: run.status,
+      status: hasAdverseOutcome(run.outcome) ? 'failed' : run.status,
       durationMs: run.durationMs,
     });
   }
@@ -279,8 +290,13 @@ export function buildSoftwareWorkView(input: {
   readonly outputFileCount?: number;
 }): SoftwareWorkView {
   const { steps, live } = input;
+  const terminalOutcome = [...steps]
+    .reverse()
+    .find((step) => step.stage === 'turn-terminal')
+    ?.outcome;
+  const workSteps = steps.filter((step) => step.stage !== 'turn-terminal');
   const buckets = new Map<SoftwarePhaseId, ChatProgressStep[]>();
-  for (const step of steps) {
+  for (const step of workSteps) {
     const id = phaseForSoftwareStage(step.stage);
     const bucket = buckets.get(id) ?? [];
     bucket.push(step);
@@ -288,7 +304,7 @@ export function buildSoftwareWorkView(input: {
   }
 
   const activeStep = live
-    ? [...steps].reverse().find((step) => step.status === 'running') ?? steps.at(-1)
+    ? [...workSteps].reverse().find((step) => step.status === 'running') ?? workSteps.at(-1)
     : undefined;
   const activeId = activeStep ? phaseForSoftwareStage(activeStep.stage) : undefined;
   const issueCount = issueCountFrom(steps);
@@ -299,10 +315,13 @@ export function buildSoftwareWorkView(input: {
   const phases = PHASES.map((phase): SoftwarePhaseView => {
     const phaseSteps = buckets.get(phase.id) ?? [];
     const latest = phaseSteps.at(-1);
-    const hasAttention = phaseSteps.some((step) => /issue|failed|refused|withheld|sent back|invalid|blocked/i.test(`${step.label} ${step.detail ?? ''}`));
+    const hasAttention = phaseSteps.some((step) =>
+      hasAdverseOutcome(step.outcome)
+      || /issue|failed|refused|withheld|sent back|invalid|blocked/i.test(`${step.label} ${step.detail ?? ''}`),
+    );
     const status: SoftwarePhaseStatus = phase.id === activeId
       ? 'running'
-      : hasAttention && (live || withheld)
+      : hasAttention && (live || withheld || hasAdverseOutcome(terminalOutcome))
         ? 'attention'
         : phaseSteps.length > 0 && phaseSteps.every((step) => step.status === 'done')
           ? 'done'
@@ -316,7 +335,7 @@ export function buildSoftwareWorkView(input: {
     };
   });
 
-  const journal = buildJournal(steps);
+  const journal = buildJournal(workSteps);
   const completedCount = phases.filter((phase) => phase.status === 'done').length;
   const outputFileCount = input.outputFileCount ?? 0;
   const observableActionCount = journal.reduce((total, item) => total + 1 + item.notes.length, 0);
@@ -325,11 +344,17 @@ export function buildSoftwareWorkView(input: {
   const fileSummary = outputFileCount > 0 ? `${outputFileCount} file${outputFileCount === 1 ? '' : 's'} ready` : 'review complete';
   const actionSummary = observableActionCount > 0 ? ` · ${observableActionCount} recorded action${observableActionCount === 1 ? '' : 's'}` : '';
   const activePhase = activeId ? PHASES.find((phase) => phase.id === activeId) : undefined;
-  const outcomeSummary = withheld
+  const outcomeSummary = terminalOutcome === 'failed'
+    ? 'Failed · work did not complete'
+    : terminalOutcome === 'interrupted'
+      ? 'Interrupted · work stopped before completion'
+      : terminalOutcome === 'not-run'
+        ? 'Not run · no work was executed'
+        : withheld
     ? `Withheld${remainingIssueCount > 0
       ? ` · ${remainingIssueCount} of ${Math.max(issueCount, remainingIssueCount)} validation issues remain`
       : issueCount > 0 ? ` · ${issueCount} validation issue${issueCount === 1 ? '' : 's'} found` : ''}`
-    : `Implementation · ${fileSummary}`;
+          : `Implementation · ${fileSummary}`;
 
   return {
     phases,
@@ -347,6 +372,7 @@ export function buildSoftwareWorkView(input: {
     outputFileCount,
     observableActionCount,
     withheld,
+    outcome: terminalOutcome,
     summary: `${outcomeSummary}${actionSummary}${repairSummary}${durationSummary}`,
   };
 }

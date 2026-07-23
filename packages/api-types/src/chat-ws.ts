@@ -154,10 +154,20 @@ const processLogEntrySchema = z.object({
   body: z.string().optional(),
 }).strict();
 
+export const progressOutcomeSchema = z.enum([
+  'succeeded',
+  'failed',
+  'interrupted',
+  'withheld',
+  'not-run',
+]);
+
 const toolRunProgressSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   status: z.enum(['running', 'done', 'failed']),
+  outcome: progressOutcomeSchema.optional(),
+  evidenceId: z.string().min(1).max(200).optional(),
   success: z.boolean().optional(),
   durationMs: z.number().nonnegative().optional(),
   input: z.string().optional(),
@@ -198,6 +208,8 @@ const draftVoteSchema = z.object({
  */
 const draftRaceProgressSchema = z.object({
   status: z.enum(['drafting', 'voting', 'decided']),
+  outcome: progressOutcomeSchema.optional(),
+  evidenceId: z.string().min(1).max(200).optional(),
   candidates: z.array(draftCandidateSchema),
   votes: z.array(draftVoteSchema).default([]),
   winnerId: z.string().optional(),
@@ -209,6 +221,8 @@ export const chatProgressStepSchema = z.object({
   label: z.string().min(1),
   detail: z.string().optional(),
   status: z.enum(['running', 'done']),
+  outcome: progressOutcomeSchema.optional(),
+  evidenceId: z.string().min(1).max(200).optional(),
   /** Wall-clock cost of this step, attached when the stage settles — lets the timeline answer "where did time go". */
   durationMs: z.number().nonnegative().optional(),
   advisor: advisorTraceSchema.optional(),
@@ -225,6 +239,7 @@ export const chatProgressStepSchema = z.object({
 export type AdvisorQualityContract = z.infer<typeof advisorQualityContractSchema>;
 export type AdvisorRouteGuidance = z.infer<typeof advisorRouteGuidanceSchema>;
 export type AdvisorTrace = z.infer<typeof advisorTraceSchema>;
+export type ProgressOutcome = z.infer<typeof progressOutcomeSchema>;
 export type ChatProgressStep = z.infer<typeof chatProgressStepSchema>;
 export type DraftCandidate = z.infer<typeof draftCandidateSchema>;
 export type DraftVote = z.infer<typeof draftVoteSchema>;
@@ -239,6 +254,8 @@ const chatOutboundTypeSchema = z.enum([
 /** Transport envelope validated immediately before every WebSocket send. */
 export const chatWebSocketOutboundSchema = z.object({
   type: chatOutboundTypeSchema,
+  /** Semantic terminal result for `done`; absent on legacy producers. */
+  turnOutcome: progressOutcomeSchema.optional(),
   textDelta: z.string().optional(),
   reasoningDelta: z.string().optional(),
   draftText: z.string().optional(),

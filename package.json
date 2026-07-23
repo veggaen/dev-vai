@@ -21,6 +21,7 @@
     "test:watch": "node node_modules/vitest/vitest.mjs",
     "lint": "node scripts/run-lint.mjs",
     "lint:constants": "node scripts/check-platform-constants.mjs",
+    "check:tauri-line": "node scripts/check-tauri-version-line.mjs",
     "credentials:list": "node scripts/vai-credentials.mjs list",
     "credentials:revoke": "node scripts/vai-credentials.mjs revoke",
     "hygiene": "node scripts/run-hygiene.mjs",

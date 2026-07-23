@@ -4,6 +4,7 @@ import {
   resolveConversationSandboxProjectIdOption,
   resolveConversationResumeId,
   isConversationWorking,
+  finalizeProgressStepsForMessage,
   mergeAuditPriorDraftExcerpt,
   mergeProgressStepsForMessage,
   parseAssistantMessagePlan,
@@ -190,5 +191,80 @@ describe('mergeProgressStepsForMessage — stable process timeline identity', ()
 
     expect(steps).toHaveLength(1);
     expect(steps[0]).toMatchObject({ stage: 'search', label: 'Found 1 source', detail: '1 source' });
+  });
+
+  it('preserves a terminal failure when a stale running frame arrives late', () => {
+    const steps = mergeProgressStepsForMessage([{
+      stage: 'verify',
+      label: 'Verification failed',
+      status: 'done',
+      outcome: 'failed',
+      evidenceId: 'proof:verify',
+    }], {
+      stage: 'verify',
+      label: 'Still checking',
+      status: 'running',
+    });
+
+    expect(steps[0]).toMatchObject({
+      status: 'done',
+      outcome: 'failed',
+      evidenceId: 'proof:verify',
+    });
+  });
+});
+
+describe('finalizeProgressStepsForMessage — truthful terminal receipts', () => {
+  it('settles unfinished work and tools as failed on an error frame', () => {
+    const steps = finalizeProgressStepsForMessage([{
+      stage: 'verify',
+      label: 'Running typecheck',
+      status: 'running',
+      toolRuns: [{ id: 'typecheck-1', name: 'typecheck', status: 'running' }],
+    }], 'failed');
+
+    expect(steps[0]).toMatchObject({
+      status: 'done',
+      outcome: 'failed',
+      evidenceId: 'progress:1:verify',
+    });
+    expect(steps[0]?.toolRuns?.[0]).toMatchObject({
+      status: 'failed',
+      outcome: 'failed',
+      evidenceId: 'progress:1:verify:tool:typecheck-1',
+    });
+    expect(steps.at(-1)).toMatchObject({
+      stage: 'turn-terminal',
+      label: 'Turn failed',
+      outcome: 'failed',
+    });
+  });
+
+  it('marks a manual stop interrupted without erasing already successful work', () => {
+    const steps = finalizeProgressStepsForMessage([
+      { stage: 'read', label: 'Read files', status: 'done' },
+      { stage: 'build', label: 'Editing', status: 'running' },
+    ], 'interrupted');
+
+    expect(steps[0]?.outcome).toBe('succeeded');
+    expect(steps[1]?.outcome).toBe('interrupted');
+    expect(steps.at(-1)).toMatchObject({
+      stage: 'turn-terminal',
+      label: 'Turn interrupted',
+      outcome: 'interrupted',
+    });
+  });
+
+  it('replaces an earlier terminal marker instead of duplicating it', () => {
+    const first = finalizeProgressStepsForMessage([
+      { stage: 'read', label: 'Read files', status: 'running' },
+    ], 'interrupted');
+    const retried = finalizeProgressStepsForMessage(first, 'succeeded');
+    expect(retried.filter((step) => step.stage === 'turn-terminal')).toHaveLength(1);
+    expect(retried.at(-1)?.outcome).toBe('succeeded');
+  });
+
+  it('does not create a process surface for turns that emitted no progress', () => {
+    expect(finalizeProgressStepsForMessage([], 'succeeded')).toEqual([]);
   });
 });

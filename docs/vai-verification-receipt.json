@@ -1,12 +1,20 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-23T18:17:30.4592559+02:00",
-  "status": "pass",
-  "totalTestsPassed": 5436,
+  "capturedAt": "2026-07-23T23:07:20.988+02:00",
+  "status": "fail",
+  "totalTestsPassed": 5459,
   "suites": [
     {
-      "name": "full monorepo Vitest regression suite (thread pool, single worker)",
-      "testsPassed": 5436
+      "name": "full monorepo Vitest regression suite (all assertions passed; aggregate runner failed after completion)",
+      "testsPassed": 5459,
+      "testsSkipped": 48,
+      "filesPassed": 331,
+      "filesSkipped": 1,
+      "runnerError": "Vitest worker RPC timeout calling onTaskUpdate after test execution completed"
+    },
+    {
+      "name": "truthful turn receipt focused suite",
+      "testsPassed": 124
     }
   ],
   "typechecks": [
@@ -21,12 +29,12 @@
   ],
   "checks": [
     "corepack pnpm install --offline --frozen-lockfile",
-    "node node_modules/vitest/vitest.mjs run --pool=threads --maxWorkers=1 (331 files passed; 1 skipped; 5,436 tests passed; 48 skipped)",
-    "corepack pnpm -r --parallel typecheck",
+    "node node_modules/vitest/vitest.mjs run (331 files passed; 1 skipped; 5,459 tests passed; 48 skipped; aggregate exit 1 after a worker RPC timeout)",
+    "corepack pnpm -r --parallel typecheck (all 10 participating workspaces passed)",
     "corepack pnpm lint (0 errors; existing warnings only)",
     "node scripts/check-platform-constants.mjs",
-    "corepack pnpm build",
-    "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
-    "post-build portability fix: 14 focused runtime tests and @vai/runtime typecheck"
+    "node scripts/check-tauri-version-line.mjs (JavaScript 2.10.1 and Rust 2.10.3 share the 2.10 line)",
+    "node scripts/platform-audit.mjs (15 passed; known M20 source-hotspot budget failed; route count informational)",
+    "six-mode visual receipt matrix at 1440x900 (3 layout modes x 2 themes; zero browser/page errors and zero horizontal overflow)"
   ]
 }

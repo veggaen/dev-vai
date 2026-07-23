@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import type { ConversationSummary, CreateConversationResponse } from '@vai/contracts/responses';
-import type { ChatProgressStep as ChatProgressStepContract } from '@vai/contracts/chat-ws';
+import type {
+  ChatProgressStep as ChatProgressStepContract,
+  ProgressOutcome,
+} from '@vai/contracts/chat-ws';
 import { apiFetch, buildChatWebSocketProtocols, buildChatWebSocketUrl } from '../lib/api.js';
 import { getActiveCapture, startSessionCapture } from '../lib/sessionCapture.js';
 import type { SessionCapture } from '../lib/sessionCapture.js';
@@ -50,6 +53,24 @@ export interface GroundedBuildBriefUI {
 export type ChatProgressStep = ChatProgressStepContract;
 
 export const MAX_PROGRESS_STEPS_PER_MESSAGE = 200;
+
+function progressEvidenceId(stage: string, index: number): string {
+  const normalized = stage
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'step';
+  return `progress:${index + 1}:${normalized}`;
+}
+
+function terminalProgressLabel(outcome: ProgressOutcome): string {
+  if (outcome === 'succeeded') return 'Turn completed';
+  if (outcome === 'failed') return 'Turn failed';
+  if (outcome === 'interrupted') return 'Turn interrupted';
+  if (outcome === 'withheld') return 'Output withheld';
+  return 'Turn not run';
+}
 
 /** IDE agent identity for group chat messages */
 export interface MessageSender {
@@ -272,9 +293,15 @@ export interface ChatMessage {
 /** Preserve nested payloads when the backend re-emits the same stage (e.g. council members arriving late). */
 function mergeProgressStep(existing: ChatProgressStep | undefined, incoming: ChatProgressStep): ChatProgressStep {
   if (!existing) return incoming;
+  const staleRunningUpdate = existing.outcome !== undefined && incoming.status === 'running';
   return {
     ...existing,
     ...incoming,
+    status: staleRunningUpdate ? existing.status : incoming.status,
+    outcome: staleRunningUpdate
+      ? existing.outcome
+      : incoming.outcome ?? existing.outcome,
+    evidenceId: incoming.evidenceId ?? existing.evidenceId,
     advisor: incoming.advisor ?? existing.advisor,
     councilMembers: incoming.councilMembers?.length ? incoming.councilMembers : existing.councilMembers,
     processLog: incoming.processLog?.length ? incoming.processLog : existing.processLog,
@@ -307,12 +334,86 @@ export function mergeProgressStepsForMessage(
     }
   }
 
-  const normalizedExisting = existing.map((step) =>
-    step.status === 'running'
-      ? { ...step, status: 'done' as const }
-      : step,
-  );
-  return [...normalizedExisting, incoming].slice(-MAX_PROGRESS_STEPS_PER_MESSAGE);
+  const normalizedExisting = existing.map((step, index) => ({
+    ...step,
+    evidenceId: step.evidenceId ?? progressEvidenceId(step.stage, index),
+  }));
+  return [
+    ...normalizedExisting,
+    {
+      ...incoming,
+      evidenceId: incoming.evidenceId ?? progressEvidenceId(incoming.stage, existing.length),
+    },
+  ].slice(-MAX_PROGRESS_STEPS_PER_MESSAGE);
+}
+
+/**
+ * Settle the exact assistant trace that received the terminal transport event.
+ * Lifecycle (`running`/`done`) remains backwards-compatible while semantic
+ * outcome records whether the work actually succeeded, failed, or was stopped.
+ */
+export function finalizeProgressStepsForMessage(
+  existing: readonly ChatProgressStep[],
+  turnOutcome: ProgressOutcome,
+): ChatProgressStep[] {
+  if (existing.length === 0) return [];
+  const withoutPriorTerminal = existing.filter((step) => step.stage !== 'turn-terminal');
+  const settled = withoutPriorTerminal.map((step, index): ChatProgressStep => {
+    const outcome = step.outcome
+      ?? (step.status === 'done'
+        ? 'succeeded'
+        : turnOutcome === 'failed'
+          ? 'failed'
+          : turnOutcome === 'succeeded'
+            ? 'interrupted'
+            : turnOutcome);
+    const stepId = step.evidenceId ?? progressEvidenceId(step.stage, index);
+    return {
+      ...step,
+      status: 'done',
+      outcome,
+      evidenceId: stepId,
+      toolRuns: step.toolRuns?.map((run) => {
+        const toolOutcome = run.outcome
+          ?? (run.status === 'failed' || run.success === false
+            ? 'failed'
+            : run.status === 'done'
+              ? 'succeeded'
+              : turnOutcome === 'failed'
+                ? 'failed'
+                : turnOutcome === 'succeeded'
+                  ? 'interrupted'
+                  : turnOutcome);
+        return {
+          ...run,
+          status: toolOutcome === 'failed' ? 'failed' as const : 'done' as const,
+          outcome: toolOutcome,
+          evidenceId: run.evidenceId ?? `${stepId}:tool:${run.id}`,
+        };
+      }),
+      draftRace: step.draftRace
+        ? {
+            ...step.draftRace,
+            status: 'decided',
+            outcome: step.draftRace.outcome
+              ?? (step.draftRace.status === 'decided'
+                ? 'succeeded'
+                : turnOutcome === 'succeeded'
+                  ? 'interrupted'
+                  : turnOutcome),
+            evidenceId: step.draftRace.evidenceId ?? `${stepId}:draft-race`,
+          }
+        : undefined,
+    };
+  });
+  const terminal: ChatProgressStep = {
+    stage: 'turn-terminal',
+    label: terminalProgressLabel(turnOutcome),
+    status: 'done',
+    outcome: turnOutcome,
+    evidenceId: 'progress:terminal:turn',
+  };
+  return [...settled, terminal].slice(-MAX_PROGRESS_STEPS_PER_MESSAGE);
 }
 
 function isAuditMetaUI(value: unknown): value is AuditMetaUI {
@@ -1200,6 +1301,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const chunk = JSON.parse(event.data as string) as {
         type: string;
+        turnOutcome?: ProgressOutcome;
         textDelta?: string;
         reasoningDelta?: string;
         draftText?: string;
@@ -1422,6 +1524,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return {
               ...m,
               liveDraft: null,
+              progressSteps: finalizeProgressStepsForMessage(
+                m.progressSteps ?? [],
+                chunk.turnOutcome ?? 'succeeded',
+              ),
               ...(chunk.modelId ? { respondingModelId: chunk.modelId } : {}),
               ...(thinking ? { thinking } : {}),
               ...(thinking?.auditMeta ? { auditMeta: thinking.auditMeta } : {}),
@@ -1459,7 +1565,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       } else if (chunk.type === 'error') {
         flushPendingStreamDelta();
-        set({ isStreaming: false, streamingConversationId: null });
+        set((state) => ({
+          isStreaming: false,
+          streamingConversationId: null,
+          messages: state.messages.map((message) =>
+            message.id === activeStreamingAssistantId && message.role === 'assistant'
+              ? {
+                  ...message,
+                  progressSteps: finalizeProgressStepsForMessage(message.progressSteps ?? [], 'failed'),
+                }
+              : message,
+          ),
+        }));
         get().appendToLastMessage(`\n\nError: ${chunk.error}`);
         flushPendingStreamDelta();
         // Log error in dev logs
@@ -1476,7 +1593,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     ws.onerror = () => {
       if (activeWs !== ws) return;
       flushPendingStreamDelta();
-      set({ isStreaming: false, streamingConversationId: null });
+      set((state) => ({
+        isStreaming: false,
+        streamingConversationId: null,
+        messages: state.messages.map((message) =>
+          message.id === activeStreamingAssistantId && message.role === 'assistant'
+            ? {
+                ...message,
+                progressSteps: finalizeProgressStepsForMessage(message.progressSteps ?? [], 'interrupted'),
+              }
+            : message,
+        ),
+      }));
       get().appendToLastMessage('\n\nConnection error');
       flushPendingStreamDelta();
       const capture = getActiveCapture();
@@ -1486,17 +1614,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (activeWs === ws) activeWs = null;
       activeStreamingAssistantId = null;
     };
+
+    ws.onclose = () => {
+      // `done`, explicit error, and manual stop clear activeWs before their
+      // intentional close reaches this callback. Only an unexpected close
+      // remains active and therefore owns this interrupted terminal path.
+      if (activeWs !== ws) return;
+      flushPendingStreamDelta();
+      set((state) => ({
+        isStreaming: false,
+        streamingConversationId: null,
+        messages: state.messages.map((message) =>
+          message.id === activeStreamingAssistantId && message.role === 'assistant'
+            ? {
+                ...message,
+                progressSteps: finalizeProgressStepsForMessage(message.progressSteps ?? [], 'interrupted'),
+              }
+            : message,
+        ),
+      }));
+      get().appendToLastMessage('\n\nConnection closed before completion');
+      flushPendingStreamDelta();
+      activeWs = null;
+      activeStreamingAssistantId = null;
+    };
   },
 
   stopStreaming: () => {
     flushPendingStreamDelta();
+    const stoppedAssistantId = activeStreamingAssistantId;
     if (activeWs) {
       activeWs.close();
       activeWs = null;
     }
     activeStreamingAssistantId = null;
     // A manual stop cancels any queued follow-up — the user chose to halt.
-    set({ isStreaming: false, streamingConversationId: null, queuedMessage: null });
+    set((state) => ({
+      isStreaming: false,
+      streamingConversationId: null,
+      queuedMessage: null,
+      messages: state.messages.map((message) =>
+        message.id === stoppedAssistantId && message.role === 'assistant'
+          ? {
+              ...message,
+              progressSteps: finalizeProgressStepsForMessage(message.progressSteps ?? [], 'interrupted'),
+            }
+          : message,
+      ),
+    }));
   },
 
   setQueuedMessage: (content: string | null) => {
