@@ -6,6 +6,29 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **AUDIT 2026-07-24 - Cross-provider session archaeology recovered five current gaps without importing transcript noise**
+  - A bounded read-only pass covered 709 project/product-linked local sessions across Codex, VS Code, the VS Code
+    Claude extension, Cursor, Antigravity, Grok, and native Vai: 3.40 GiB scanned, 3,032 explicit human turns, and
+    22,763 assistant turns after provider envelopes, tool/subagent payloads, hidden reasoning, unrelated working
+    directories, and duplicate imported events were excluded. VS Code coverage remains partial because 154 individual
+    state-snapshot lines exceeded the safe per-line bound; this limit is explicit rather than silently called complete.
+  - Fresh-context review promoted five gaps: one composer must own all natural-language instructions; model/Council
+    context needs used/considered/excluded/unavailable receipts; browser work needs a redacted chat-native replay
+    artifact; cross-provider work needs compact portable checkpoints and a private goal/decision/evidence chronicle;
+    and duplicate memories may only be consolidated through reversible, provenance-preserving proposals.
+  - Current-code proof for the sharpest UX gap: `apps/desktop/src/components/ide/WorkspaceLauncher.tsx` still exposes
+    `Ask the coder to change this file…` plus Generate/Council beside the primary `ChatWindow` composer, matching the
+    owner's 2026-07-08 two-input complaint. Smallest next slice after the active M02 WIP allows it: open a composer-
+    ownership design note, route selected-file/role context into the primary composer, and verify file edit, Council
+    edit, keyboard, voice, and narrow-layout paths.
+  - Existing work was not renamed as new: M08 owns durable journals, M15 owns measured voice correction, M13 owns
+    global practical-web proof, confidence-scored skills absorb old “Echo” templates, and competition/mutation waves
+    absorb adversarial self-training. Proof-carrying Council experiments extend M02; they do not bypass owner review.
+  - Full evidence, provenance IDs, fresh-context scores, disproof tests, absorbed themes, privacy boundary, and source
+    limits: `docs/research/session-archaeology-forgotten-gold-2026-07-24.md`. The 2026-04-29
+    `prior-session-corpus-mining` deferral is now resolved: its crash-risk warning was correct, but its “nothing
+    decision-relevant remains” conclusion was too broad.
+
 - **PARTIAL 2026-07-10 - Chat-to-software live proof, concise receipts, and honest rendered verification**
   - Exact project-bound Agent edit passed the real desktop path end to end: disposable chat bound to the exact
     `DEV_MPM/mpm-frontend` root, one-file mutation, visible HMR result in App, compact completion receipt, reversible
