@@ -438,6 +438,14 @@ async function printStatus(opts) {
       console.log(formatRoi(analyzeRoiTrend(series)));
     }
   } catch (e) { /* ledger not created yet — capability arc hasn't run; silent */ }
+  try {
+    const { buildAdoptionBoard, formatAdoptionBoard } = await import('./adoption-control.mjs');
+    const board = buildAdoptionBoard(db, { limit: 5 });
+    console.log(formatAdoptionBoard(board));
+    console.log('  decisions: pnpm self-improve:adoption -- decide <fingerprint> --status <state> ...');
+  } catch (error) {
+    console.log(`Adoption board: unavailable (${String(error.message ?? error).slice(0, 100)})`);
+  }
   if (live) {
     const label = lastRun?.status === 'running' ? 'Live heartbeat' : 'Last heartbeat';
     const suffix = lastRun?.status === 'running' ? (live.phase ?? '') : '(run complete)';

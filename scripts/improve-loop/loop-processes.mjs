@@ -18,6 +18,7 @@
 import {
   campaignClassStats, getLoopState, setLoopState, bumpLoopState, recordKnowledge, ungroundableClasses,
 } from './db.mjs';
+import { deriveGenerationPolicy } from './adoption-control.mjs';
 
 /**
  * Read a cheap, real STATE SNAPSHOT once per cycle. The processes' when()/value() read ONLY
@@ -32,6 +33,11 @@ export function buildLoopContext(db, { motion, cycle } = {}) {
   const failingClasses = classStats.filter((c) =>
     Number(c.total) >= 4 && Number(c.passed) / Number(c.total) < 0.85 && !ungroundable.has(c.class));
   const worst = failingClasses.slice().sort((a, b) => (a.passed / a.total) - (b.passed / b.total))[0] ?? null;
+  const generationPolicy = safe(() => deriveGenerationPolicy(db), {
+    state: 'paused',
+    paused: true,
+    reason: 'Adoption policy could not be evaluated; generative work fails closed.',
+  });
   return {
     db,
     cycle: cycle ?? 0,
@@ -46,6 +52,8 @@ export function buildLoopContext(db, { motion, cycle } = {}) {
     cyclesSinceVisual: getLoopState(db, 'cyclesSinceVisual', 99),
     cyclesSinceCapability: getLoopState(db, 'cyclesSinceCapability', 99),
     cyclesSinceInnovationArc: getLoopState(db, 'cyclesSinceInnovationArc', 99),
+    generationPolicy,
+    generationPaused: generationPolicy.paused,
     // openExperiment is read by the innovate/experiment processes' guards.
     hasData: classStats.some((c) => Number(c.total) >= 4),
   };
@@ -106,7 +114,7 @@ export function defineLoopProcesses(deps = {}) {
       id: 'propose',
       description: 'localize a fix for the weakest failing class (verified, propose-only)',
       // Only worth it when there's a real failing class to fix. Cheap (1 model call).
-      when: (ctx) => ctx.failingClassCount > 0 && !!ctx.worstClass,
+      when: (ctx) => !ctx.generationPaused && ctx.failingClassCount > 0 && !!ctx.worstClass,
       cost: () => 1,
       value: (ctx) => (ctx.worstPassRate != null ? 0.9 * (1 - ctx.worstPassRate) + 0.1 : 0),
       run: async (ctx) => {
@@ -143,7 +151,8 @@ export function defineLoopProcesses(deps = {}) {
       // a fix (prototype) beats QUEUING an experiment — and innovate opening an experiment would
       // block prototype via the one-change-at-a-time guard, starving the loop of real work (the
       // "perpetual but inactive" failure). So innovate only fires when prototype has nothing to do.
-      when: (ctx) => ctx.hasData && !(ctx.failingClassCount > 0 && !!ctx.worstClass && !safe(() => anyOpen(ctx.db), false)),
+      when: (ctx) => !ctx.generationPaused && ctx.hasData
+        && !(ctx.failingClassCount > 0 && !!ctx.worstClass && !safe(() => anyOpen(ctx.db), false)),
       cost: (ctx) => (ctx.motionState === 'stalling' || ctx.motionState === 'regressing' ? 0.2 : 0.1),
       value: (ctx) => (ctx.motionState === 'regressing' ? 0.8 : ctx.motionState === 'stalling' ? 0.6 : 0.2),
       run: async (ctx) => {
@@ -210,7 +219,7 @@ export function defineLoopProcesses(deps = {}) {
       // higher-density work. This is where "spend the move well" matters most.
       // Keep the most expensive process OUT of cold-start cycles — running the capability council
       // before there's any corpus signal just burns 12 budget on ungrounded ideas (CodeRabbit #25).
-      when: (ctx) => ctx.hasData && ctx.cyclesSinceCapability >= 8,
+      when: (ctx) => !ctx.generationPaused && ctx.hasData && ctx.cyclesSinceCapability >= 8,
       cost: () => 12,
       value: (ctx) => Math.min(0.7, 0.2 + 0.05 * ctx.cyclesSinceCapability),
       run: async (ctx) => {
@@ -246,7 +255,7 @@ export function defineLoopProcesses(deps = {}) {
       // lesson the loop keeps re-learning but never acting on is exactly the gap to surface) — this
       // is what makes the perpetual loop a self-INNOVATOR, not just a self-tuner. Route-only here:
       // a fundamental find is escalated to V3gga, an autonomous one is surfaced for the build step.
-      when: (ctx) => ctx.hasData && ctx.cyclesSinceInnovationArc >= 2,
+      when: (ctx) => !ctx.generationPaused && ctx.hasData && ctx.cyclesSinceInnovationArc >= 2,
       cost: () => 0.1,
       value: (ctx) => (ctx.motionState === 'regressing' ? 0.7 : ctx.motionState === 'stalling' ? 0.5 : 0.25),
       run: async (ctx) => {

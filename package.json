@@ -73,6 +73,7 @@
     "self-improve:operator": "node --experimental-sqlite scripts/improve-loop/operator.mjs",
     "self-improve:doctor": "node --experimental-sqlite scripts/improve-loop/operator.mjs doctor",
     "self-improve:status": "node --experimental-sqlite scripts/improve-loop/operator.mjs status",
+    "self-improve:adoption": "node --experimental-sqlite scripts/improve-loop/adoption-cli.mjs",
     "self-improve:start": "node --experimental-sqlite scripts/improve-loop/operator.mjs start",
     "self-improve:stop": "node --experimental-sqlite scripts/improve-loop/operator.mjs stop",
     "self-improve:recover-stale": "node --experimental-sqlite scripts/improve-loop/operator.mjs recover-stale",

@@ -2,6 +2,7 @@
   "ports": {
     "runtime": 3006,
     "directAgent": 48765,
+    "selfImprovementWatch": 4123,
     "viteDev": 5173,
     "viteDevAlternate": 5174,
     "vitePreview": 4173

@@ -19,6 +19,36 @@ import {
 
 const LENS = { id: 'multimodal-voice', area: 'voice', title: 't', lens: 'l' };
 
+test('runCapabilityRound: adoption pause prevents direct model and filesystem work', async (t) => {
+  let openDb;
+  try { ({ openDb } = await import('./db.mjs')); }
+  catch { return t.skip('node:sqlite unavailable (run with --experimental-sqlite)'); }
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { rmSync } = await import('node:fs');
+  const dbPath = join(tmpdir(), `vai-cap-pause-${Date.now()}.sqlite`);
+  const db = openDb(dbPath);
+  try {
+    recordComputeRound(db, { modelCalls: 10, proposals: 4, qualified: 4 });
+    recordComputeRound(db, { modelCalls: 10, proposals: 4, qualified: 4 });
+    recordComputeRound(db, { modelCalls: 10, proposals: 4, qualified: 4 });
+    let generated = 0;
+    const out = await runCapabilityRound({
+      db,
+      fsImpl: { readFileSync: () => { throw new Error('filesystem should not be touched'); } },
+      generateFor: async () => { generated += 1; return '{}'; },
+    });
+    assert.equal(out.paused, true);
+    assert.equal(out.compute.modelCalls, 0);
+    assert.equal(out.lensesRun, 0);
+    assert.equal(generated, 0);
+    assert.equal(computeRoiSeries(db, 10).length, 3);
+  } finally {
+    db.close();
+    rmSync(dbPath, { force: true });
+  }
+});
+
 test('parseProposal: extracts the JSON object, null on garbage', () => {
   assert.equal(parseProposal('blah {"tool":"propose","title":"x"} tail').tool, 'propose');
   assert.equal(parseProposal('no json here'), null);

@@ -1,7 +1,9 @@
 # Vai engineering company portfolio — 20 missions
 
-Status: active and audited 2026-07-23; M01 shipped with evidence in
-`truthful-turn-receipts.md`.
+Status: active and audited 2026-07-24; M01 shipped, and the M02 governed
+control-plane slice shipped with evidence in
+`self-improvement-adoption-control-plane.md`. M02 remains active until three
+real improvements earn positive measured shipment credit.
 
 ## Operating model
 

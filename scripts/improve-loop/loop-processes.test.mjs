@@ -19,6 +19,19 @@ function seedClass(db, klass, passed, total) {
     recordResult(db, { runId, promptId: pid, klass, readAs: 'd', passed: k < passed });
   }
 }
+function seedWastefulCompute(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS compute_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, model_calls INTEGER, wall_ms INTEGER,
+    proposals INTEGER, qualified INTEGER, adopted INTEGER NOT NULL DEFAULT 0,
+    council_overall REAL, cross_refs INTEGER, created_at TEXT NOT NULL
+  )`);
+  const insert = db.prepare(
+    'INSERT INTO compute_log (model_calls,wall_ms,proposals,qualified,adopted,created_at) VALUES (?,?,?,?,?,?)',
+  );
+  for (let index = 0; index < 3; index += 1) {
+    insert.run(10, 1000, 4, 4, 0, `2026-07-2${index}T00:00:00.000Z`);
+  }
+}
 const reg = (deps) => createRegistry(defineLoopProcesses(deps));
 
 test('buildLoopContext: cold-start has no data, identifies worst failing class when present', () => {
@@ -68,6 +81,26 @@ test('NO failing class: propose is NOT run (no wasted model call)', () => {
     const ctx = buildLoopContext(db, { motion: { state: 'improving', passRate: { current: 1 } }, cycle: 2 });
     const planned = plan(reg({ anyOpen: () => false }), ctx, { budget: 100 });
     assert.ok(!planned.chosen.includes('propose'));
+  } finally { db.close(); rmSync(f, { force: true }); }
+});
+
+test('ADOPTION BOTTLENECK: pauses generative processes but keeps observation and owner-armed prototype available', () => {
+  const { f, db } = tmpDb();
+  try {
+    seedClass(db, 'weak', 1, 10);
+    seedWastefulCompute(db);
+    setLoopState(db, 'cyclesSinceVisual', 0);
+    setLoopState(db, 'cyclesSinceCapability', 99);
+    setLoopState(db, 'cyclesSinceInnovationArc', 99);
+    const ctx = buildLoopContext(db, { motion: { state: 'stalling', passRate: { current: 0.1 } }, cycle: 7 });
+    assert.equal(ctx.generationPolicy.state, 'paused');
+    const planned = plan(reg({ anyOpen: () => false }), ctx, { budget: 100 });
+    assert.ok(planned.chosen.includes('observe'));
+    assert.ok(planned.chosen.includes('prototype'));
+    assert.ok(!planned.chosen.includes('propose'));
+    assert.ok(!planned.chosen.includes('innovate'));
+    assert.ok(!planned.chosen.includes('capability'));
+    assert.ok(!planned.chosen.includes('innovate-arc'));
   } finally { db.close(); rmSync(f, { force: true }); }
 });
 

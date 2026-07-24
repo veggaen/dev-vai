@@ -13,9 +13,11 @@
  * consts (DENSITY_FLOOR, ACCEPT_RATE, …) stay in their home modules — initialised from these
  * defaults — so their doc comments and test imports keep working.
  *
- * Import discipline: this module imports NOTHING from the rest of the loop (it sits at the
- * bottom of the dependency graph — anything may import it, it imports nobody).
+ * Import discipline: this module imports only the schema-free platform constants manifest. It
+ * remains at the bottom of the loop dependency graph and imports no loop runtime behavior.
  */
+
+import platformValues from '../../packages/constants/src/platform-values.json' with { type: 'json' };
 
 function deepFreeze(obj) {
   for (const v of Object.values(obj)) {
@@ -45,7 +47,10 @@ export const LOOP_DEFAULTS = deepFreeze({
   // meaning-selector: lane importance
   laneWeights: { quality: 1.0, capability: 0.9, codebase: 0.85, reliability: 0.8, routing: 0.7 },
   // operator surfaces
-  watchPort: 4123,         // watch.mjs dashboard port
+  watchPort: platformValues.ports.selfImprovementWatch, // watch.mjs dashboard port
+  adoptionBoardLimit: 50,  // bounded owner-review items returned at one boundary
+  adoptionResumeShipments: 3, // positive measured shipments required before generation resumes
+  adoptionTextLimit: 1000, // untrusted corpus text bound on JSON/operator surfaces
   // supervisor cadence
   restSeconds: 45,         // GPU breather between cycles
   computeBudget: 10,       // --engine compute units (≈ model calls) per cycle

@@ -18,6 +18,7 @@ import { selectLenses, lensPreamble } from './capability-lenses.mjs';
 import { assembleContext, PERPETUAL_GOAL } from './capability-context.mjs';
 import { scoreCapabilityProposal, scoreCouncilProcess } from './council-rubric.mjs';
 import { QUALITY_BAR } from './compute-roi.mjs';
+import { deriveGenerationPolicy } from './adoption-control.mjs';
 
 const MODEL = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b';
 
@@ -372,6 +373,23 @@ export async function runCapabilityRound({
   generateFor, vramGuard = () => waitForVramHeadroom(7 * 1024 ** 3),
   log = () => {},
 } = {}) {
+  if (db) {
+    const policy = deriveGenerationPolicy(db);
+    if (policy.paused) {
+      log(`round paused: ${policy.reason}`);
+      return {
+        paused: true,
+        pauseReason: policy.reason,
+        generation: policy,
+        ranked: [],
+        council: { overall: 0, verdict: 'paused', headline: policy.reason },
+        recorded: 0,
+        transcripts: [],
+        lensesRun: 0,
+        compute: { id: 0, modelCalls: 0, wallMs: 0, qualified: 0, crossRefs: 0 },
+      };
+    }
+  }
   const fs = fsImpl ?? (await import('node:fs'));
   const { context, goal, parts } = await assembleContext({ fsImpl: fs.readFileSync ? fs : undefined, baseUrl });
   let lenses = selectLenses(focus);

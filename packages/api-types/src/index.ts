@@ -20,3 +20,4 @@ export * from './session-responses.js';
 export * from './project-responses.js';
 export * from './adoption.js';
 export * from './operational-evidence.js';
+export * from './improvement-adoption.js';

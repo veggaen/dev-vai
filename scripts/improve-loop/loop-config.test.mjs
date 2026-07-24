@@ -44,6 +44,9 @@ test('defaults pin: meaning-selector lane weights', () => {
 
 test('defaults pin: operator + supervisor cadence', () => {
   assert.equal(LOOP_DEFAULTS.watchPort, 4123);
+  assert.equal(LOOP_DEFAULTS.adoptionBoardLimit, 50);
+  assert.equal(LOOP_DEFAULTS.adoptionResumeShipments, 3);
+  assert.equal(LOOP_DEFAULTS.adoptionTextLimit, 1000);
   assert.equal(LOOP_DEFAULTS.restSeconds, 45);
   assert.equal(LOOP_DEFAULTS.computeBudget, 10);
   assert.equal(LOOP_DEFAULTS.evictOnRest, true);

@@ -19,12 +19,19 @@ import {
   fetchLatestSharedWorkArtifact,
   type SharedWorkArtifact,
 } from '../lib/shared-work-artifact.js';
+import { PORTS, loopbackHttpUrl } from '@vai/constants';
+import {
+  improvementAdoptionBoardSchema,
+  type ImprovementAdoptionBoard,
+} from '@vai/contracts/improvement-adoption';
+import { OwnerAdoptionBoard } from './owner/OwnerAdoptionBoard.js';
 
 const SessionList = lazy(async () => ({ default: (await import('./SessionList.js')).SessionList }));
 const DockerPanel = lazy(async () => ({ default: (await import('./DockerPanel.js')).DockerPanel }));
 const KnowledgeSidePanel = lazy(async () => ({ default: (await import('./panels/KnowledgeSidePanel.js')).KnowledgeSidePanel }));
 const ProjectOversightPanel = lazy(async () => ({ default: (await import('./sidebar/ProjectOversightPanel.js')).ProjectOversightPanel }));
 const ProjectsHomePanel = lazy(async () => ({ default: (await import('./sidebar/ProjectsHomePanel.js')).ProjectsHomePanel }));
+const OWNER_WATCH_BASE = loopbackHttpUrl(PORTS.selfImprovementWatch);
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -954,8 +961,10 @@ function ControlPanel() {
  * work runs from here — it links the safe observe+visual lane (apply stays a deliberate switch).
  */
 function OwnerDashboardSection() {
-  const watchBase = 'http://localhost:4123';
+  const watchBase = OWNER_WATCH_BASE;
   const [frameOk, setFrameOk] = useState(false);
+  const [adoptionBoard, setAdoptionBoard] = useState<ImprovementAdoptionBoard | null>(null);
+  const [adoptionUnavailable, setAdoptionUnavailable] = useState(false);
   const [readAloud, setReadAloud] = useState(false);
   const tts = useVoiceOutput(readAloud);
   const [tick, setTick] = useState(0);
@@ -973,36 +982,60 @@ function OwnerDashboardSection() {
     return () => { on = false; window.clearInterval(id); };
   }, [watchBase]);
 
+  useEffect(() => {
+    let on = true;
+    const poll = async () => {
+      try {
+        const response = await fetch(`${watchBase}/adoption.json`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`adoption board ${response.status}`);
+        const parsed = improvementAdoptionBoardSchema.safeParse(await response.json());
+        if (!parsed.success) throw new Error('invalid adoption board response');
+        if (on) {
+          setAdoptionBoard(parsed.data);
+          setAdoptionUnavailable(false);
+        }
+      } catch {
+        if (on) {
+          setAdoptionBoard(null);
+          setAdoptionUnavailable(true);
+        }
+      }
+    };
+    void poll();
+    const id = window.setInterval(() => { void poll(); }, 5000);
+    return () => { on = false; window.clearInterval(id); };
+  }, [watchBase]);
+
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3" aria-label="Owner dashboard">
+    <section className="rounded-xl border border-[color:var(--border)] bg-[color:var(--panel)] p-3" aria-label="Owner dashboard">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--color-muted)]">
           <Eye className="h-3.5 w-3.5" aria-hidden /> Live view
         </div>
-        <span className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] ${frameOk ? 'bg-emerald-500/10 text-emerald-300' : 'bg-zinc-800 text-zinc-500'}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${frameOk ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+        <span className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] ${frameOk ? 'bg-emerald-500/10 text-emerald-500' : 'bg-[color:var(--bg)] text-[color:var(--color-muted)]'}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${frameOk ? 'bg-emerald-400' : 'bg-[color:var(--color-muted)]'}`} />
           {frameOk ? 'live' : 'idle'}
         </span>
       </div>
 
-      <div className="mt-2 overflow-hidden rounded-lg border border-zinc-800 bg-black/40">
+      <div className="mt-2 overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--bg)]">
         {frameOk ? (
           <img src={`${watchBase}/live-frame.jpg?t=${tick}`} alt="live probe view" className="block w-full" />
         ) : (
-          <div className="px-3 py-6 text-center text-[11px] text-zinc-500">
-            No live frame. Start the watcher: <code className="text-zinc-400">pnpm self-improve:watch</code><br />
-            then a probe: <code className="text-zinc-400">pnpm self-improve:visual -- --live</code>
+          <div className="px-3 py-6 text-center text-[11px] text-[color:var(--color-muted)]">
+            No live frame. Start the watcher: <code className="text-[color:var(--fg)]">pnpm self-improve:watch</code><br />
+            then a probe: <code className="text-[color:var(--fg)]">pnpm self-improve:visual -- --live</code>
           </div>
         )}
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-zinc-400">Voice (read answers aloud)</span>
+        <span className="text-[11px] text-[color:var(--color-muted)]">Voice (read answers aloud)</span>
         <button
           type="button"
           onClick={() => { if (readAloud) tts.cancel(); setReadAloud((v) => !v); }}
           disabled={!tts.available}
-          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${readAloud ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${readAloud ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' : 'border-[color:var(--border)] text-[color:var(--fg)] hover:bg-[color:var(--bg)]'}`}
           title={tts.available ? 'Toggle text-to-speech' : 'Speech synthesis unavailable here'}
         >
           {readAloud ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
@@ -1013,15 +1046,17 @@ function OwnerDashboardSection() {
         <button
           type="button"
           onClick={() => tts.speak('Voice output is on. Vai will read answers aloud.')}
-          className="mt-2 w-full rounded-lg border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+          className="mt-2 w-full rounded-lg border border-[color:var(--border)] px-2 py-1 text-[11px] text-[color:var(--fg)] hover:bg-[color:var(--bg)]"
         >
           Test voice
         </button>
       )}
 
-      <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+      <OwnerAdoptionBoard board={adoptionBoard} unavailable={adoptionUnavailable} />
+
+      <p className="mt-3 text-[11px] leading-relaxed text-[color:var(--color-muted)]">
         Run the self-improvement loop (safe observe + visual eyes/hands, no source edits):<br />
-        <code className="text-zinc-400">pnpm self-improve:start -- --mode observe --visual-every 1</code>
+        <code className="text-[color:var(--fg)]">pnpm self-improve:start -- --mode observe --visual-every 1</code>
       </p>
     </section>
   );

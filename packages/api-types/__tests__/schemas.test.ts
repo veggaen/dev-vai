@@ -20,6 +20,70 @@ import {
   projectHandoffIntentBodySchema,
   projectPeersBodySchema,
 } from '../src/projects.js';
+import { improvementAdoptionBoardSchema } from '../src/improvement-adoption.js';
+
+describe('improvementAdoptionBoardSchema', () => {
+  it('accepts the bounded read model and rejects unbounded/unknown boundary data', () => {
+    const board = {
+      schemaVersion: 1,
+      capturedAt: '2026-07-24T12:00:00.000Z',
+      available: true,
+      source: 'self-improve:corpus',
+      stats: {
+        rawQueuedFixes: 302,
+        deduplicatedItems: 18,
+        duplicatesCollapsed: 284,
+        openProposals: 74,
+        rejectedProposals: 214,
+        shipped: 0,
+      },
+      generation: {
+        state: 'paused',
+        paused: true,
+        reason: 'Adopt before generating more.',
+        minimumShipments: 3,
+        shipped: 0,
+        roi: {
+          state: 'wasteful',
+          realizedPerUnit: 0,
+          potentialPerUnit: 0.09,
+          realized: 0,
+          qualified: 86,
+          compute: 919,
+        },
+      },
+      items: [{
+        fingerprint: 'a'.repeat(24),
+        class: 'answer/freshness',
+        title: 'Retrieve current facts',
+        target: 'packages/core/src/chat/service.ts:42',
+        targetKnown: true,
+        observationCount: 21,
+        failureCount: 42,
+        firstObservedAt: '2026-07-01T00:00:00.000Z',
+        latestObservedAt: '2026-07-24T00:00:00.000Z',
+        sourceFixIds: [1, 2],
+        proposals: { open: 1, rejected: 2, accepted: 0 },
+        status: 'backlog',
+        assignee: null,
+        risk: null,
+        expiresAt: null,
+        decisionReason: null,
+        rollback: null,
+        evidence: null,
+        commitSha: null,
+        computeRoundId: null,
+        qualityBefore: null,
+        qualityAfter: null,
+        updatedAt: null,
+        score: 83.4,
+      }],
+    };
+    expect(improvementAdoptionBoardSchema.safeParse(board).success).toBe(true);
+    expect(improvementAdoptionBoardSchema.safeParse({ ...board, secret: 'leak' }).success).toBe(false);
+    expect(improvementAdoptionBoardSchema.safeParse({ ...board, items: Array(51).fill(board.items[0]) }).success).toBe(false);
+  });
+});
 
 describe('chatWebSocketInboundSchema', () => {
   it('accepts minimal valid payload', () => {

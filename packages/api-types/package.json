@@ -21,7 +21,8 @@
     "./session-models": "./src/session-models.ts",
     "./project-responses": "./src/project-responses.ts",
     "./adoption": "./src/adoption.ts",
-    "./operational-evidence": "./src/operational-evidence.ts"
+    "./operational-evidence": "./src/operational-evidence.ts",
+    "./improvement-adoption": "./src/improvement-adoption.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -3048,3 +3048,38 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     held below JavaScript API 2.11 until Rust moves deliberately, and a Windows
     CI job now runs the native Cargo contract.
     Design and proof: `docs/design/tauri-version-line-alignment.md`.
+
+- **SHIPPED 2026-07-24 - M02 governed self-improvement adoption control-plane slice**
+  - The live self-improvement corpus exposed an adoption bottleneck rather than
+    a generation shortage: 302 queued observations, 86 qualified proposals,
+    zero credited shipments, and 919 compute units. A deterministic board now
+    collapses those observations into 18 stable owner work items, removing 284
+    duplicates from the review workload without rewriting historical evidence.
+  - Owner decisions use append-only events plus a transactional current-state
+    row. Rejection requires a reason; approval requires assignee, risk, future
+    expiry, and rollback; shipment requires a commit, evidence, compute
+    attribution, and a positive measured quality delta. Terminal shipment
+    credit is idempotent.
+  - Generative proposal, innovation, and capability work now pauses in both
+    supervisor paths while qualified work is wasteful. The policy remains
+    paused through one or two shipments and resumes only after three positively
+    measured improvements. Observation, verification, experiment closure, and
+    explicitly armed prototype/application work remain available.
+  - A schema-validated, bounded, read-only `/adoption.json` endpoint binds
+    loopback and restricts CORS to configured local desktop origins. Corpus
+    mutation remains behind the explicit local
+    `pnpm self-improve:adoption -- decide ...` command. The desktop owner panel
+    shows raw-to-deduplicated counts, pause reason, ROI, shipment threshold, and
+    ranked work.
+  - Proof: the participating loop suite passed 48/48 and boundary/constant
+    tests passed 21/21. Contracts, constants, and desktop typechecks passed;
+    the constants policy, supervisor syntax, lint with zero errors, production
+    web build, and diff check passed. Real Chrome verification covered Compact,
+    Open, and Odyssey in dark and light: six captures, zero console/page errors,
+    zero horizontal overflow, and correct live data. Evidence is under
+    `Temporary_files/m02-adoption-control/`; design and rollback are documented
+    in `docs/design/self-improvement-adoption-control-plane.md`.
+  - Honest remaining boundary: this ships M02's control plane, not the whole
+    mission. The corpus remains at 0/3 measured shipments, so generation is
+    intentionally paused until three real proposals complete review,
+    implementation, verification, merge, and post-ship measurement.

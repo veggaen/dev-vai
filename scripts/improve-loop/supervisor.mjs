@@ -586,10 +586,26 @@ async function main() {
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stop; cycle++) {
     if (consumeStopRequest()) break;
+    const policyDb = openDb(DB_PATH);
+    let generationPolicy;
+    try {
+      const { deriveGenerationPolicy } = await import('./adoption-control.mjs');
+      generationPolicy = deriveGenerationPolicy(policyDb);
+    } finally {
+      policyDb.close();
+    }
+    if (generationPolicy.paused) {
+      log(`ADOPTION CONTROL: generation paused - ${generationPolicy.reason}`);
+    }
     if (VISUAL_ONLY) {
       log(`━━━ cycle ${cycle} : EYES (probe → screenshot/video/taste) ━━━`);
       await runVisualProbe();
       if (stop) break;
+      if (generationPolicy.paused) {
+        log('EYES complete; council proposal generation stays paused while governed adoption remains below threshold.');
+        await restWithStop(REST_S);
+        continue;
+      }
       // Put the COUNCIL to work on what the eyes just saw: read the taste verdict + top flaw and
       // propose the smallest fix to Vai's UI / eyes system. Council burns the compute; findings
       // land in the corpus log for review. This is the self-improvement, not seed-prompt noise.
@@ -662,6 +678,7 @@ async function main() {
     const db = openDb(DB_PATH);
     const run = db.prepare('SELECT id FROM runs ORDER BY id DESC LIMIT 1').get();
     let classes = db.prepare('SELECT DISTINCT class FROM fixes WHERE run_id=?').all(run.id).map((r) => r.class);
+    if (generationPolicy.paused) classes = [];
     // BUDGET GUARD: drop classes the loop can NEVER ground a fix for (orphan classes with no real
     // source file — e.g. the routing/comparison phantom that burned 50 no-file rejections, or a
     // class flagged ungroundable after ≥3 hallucinated proposals). The engine path already filters
@@ -805,7 +822,9 @@ async function main() {
     // window (spinning, not improving), planNextExperiment RECORDS the next experiment
     // to try (propose-only; deduped so it can't re-queue the same dead end). Never
     // executes it — the human/architect runs the queued experiment.
-    try {
+    if (generationPolicy.paused) {
+      log('INNOVATE: paused by adoption control; experiment closure and verification remain available.');
+    } else try {
       const { planNextExperiment } = await import('./innovation-engine.mjs');
       const idb = openDb(DB_PATH);
       const plan = planNextExperiment(idb, { record: true });
@@ -842,7 +861,9 @@ async function main() {
     // feature, an answer-path change) → ESCALATED to V3gga (the "flag the fundamental" contract).
     // Pure DB read (cheap), propose/route-only — it never edits Vai source here. Records an escalation
     // to the findings file V3gga watches so a fundamental idea reaches a human, not /dev/null.
-    try {
+    if (generationPolicy.paused) {
+      log('INNOVATION-ARC: paused by adoption control.');
+    } else try {
       const { planInnovation, formatInnovation } = await import('./innovation-arc.mjs');
       const adb = openDb(DB_PATH);
       const plan = await planInnovation(adb);
@@ -866,7 +887,7 @@ async function main() {
     // investigates the real code through each lens, and appends ranked FEATURE-level
     // upgrade proposals to the backlog. Heavy GPU → serial (after INNOVATE, before the
     // rest). Propose-only: writes the capabilities ledger + backlog, never Vai source.
-    if (CAPABILITY_EVERY > 0 && !stop && cycle % CAPABILITY_EVERY === 0) {
+    if (!generationPolicy.paused && CAPABILITY_EVERY > 0 && !stop && cycle % CAPABILITY_EVERY === 0) {
       log(`━━━ cycle ${cycle} : CAPABILITY (generative council → backlog) ━━━`);
       const capArgs = ['--base-url', BASE_URL];
       if (CAPABILITY_FOCUS) capArgs.push('--focus', CAPABILITY_FOCUS);

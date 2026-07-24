@@ -17,6 +17,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { openDb, classStats, latestVisualEvents, latestVisualRun, readHeartbeat, readVisualLive, buildVisualCouncilPacket, topTasteLessons, recentLoopEvents, bannedFixes } from './db.mjs';
 import { loadLoopConfig } from './loop-config.mjs';
+import { buildAdoptionBoard, validateAdoptionBoard } from './adoption-control.mjs';
+import platformValues from '../../packages/constants/src/platform-values.json' with { type: 'json' };
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -573,13 +575,55 @@ function visualJson() {
   return { packet, live };
 }
 
+function adoptionJson() {
+  const db = openDb(DB_PATH);
+  try {
+    return validateAdoptionBoard(buildAdoptionBoard(db));
+  } finally {
+    db.close();
+  }
+}
+
+const CORS_ORIGINS = new Set([
+  ...['localhost', '127.0.0.1'].flatMap((host) => [
+    `http://${host}:${platformValues.ports.viteDev}`,
+    `http://${host}:${platformValues.ports.viteDevAlternate}`,
+    `http://${host}:${platformValues.ports.vitePreview}`,
+  ]),
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+]);
+const jsonHeaders = (req) => {
+  const headers = {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  };
+  const origin = String(req.headers.origin ?? '');
+  if (CORS_ORIGINS.has(origin)) {
+    headers['access-control-allow-origin'] = origin;
+    headers.vary = 'Origin';
+  }
+  return headers;
+};
+
 createServer((req, res) => {
   if (req.url === '/favicon.ico') { res.writeHead(204); res.end(); return; }
   // Lightweight machine-readable surfaces so a council member or helper can poll the
   // latest visual verdict without parsing HTML or reloading the dashboard.
   if (req.url === '/visual.json') {
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    res.writeHead(200, jsonHeaders(req));
     res.end(JSON.stringify(visualJson()));
+    return;
+  }
+  if (req.url === '/adoption.json') {
+    try {
+      res.writeHead(200, jsonHeaders(req));
+      res.end(JSON.stringify(adoptionJson()));
+    } catch (error) {
+      res.writeHead(503, jsonHeaders(req));
+      res.end(JSON.stringify({ error: String(error.message ?? error).slice(0, 160) }));
+    }
     return;
   }
   // Live frame: the JPEG the probe overwrites while driving the app. Served no-store so the
@@ -597,7 +641,7 @@ createServer((req, res) => {
     try {
       body = JSON.stringify({ ...loopStatus(), config: LOOP_CONFIG, configSources: LOOP_CONFIG_SOURCES });
     } catch (e) { body = JSON.stringify({ error: String(e).slice(0, 120) }); }
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    res.writeHead(200, jsonHeaders(req));
     res.end(body);
     return;
   }
@@ -609,13 +653,13 @@ createServer((req, res) => {
   }
   if (req.url === '/live-frame.meta') {
     stat(LIVE_FRAME).then((s) => {
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.writeHead(200, jsonHeaders(req));
       res.end(JSON.stringify({ ageMs: Date.now() - s.mtimeMs, mtime: s.mtimeMs }));
-    }).catch(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ageMs: null })); });
+    }).catch(() => { res.writeHead(200, jsonHeaders(req)); res.end(JSON.stringify({ ageMs: null })); });
     return;
   }
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   res.end(page());
-}).listen(PORT, () => {
+}).listen(PORT, '127.0.0.1', () => {
   process.stdout.write(`\n  👁  Watch the loop live:  http://localhost:${PORT}\n  (reads ${DB_PATH}, auto-refreshes while running)\n\n`);
 });
