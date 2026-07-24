@@ -143,7 +143,7 @@
     "postject": "1.0.0-alpha.6",
     "prettier": "^3.6.2",
     "promptfoo": "^0.121.17",
-    "puppeteer": "^24.37.5",
+    "puppeteer": "^25.3.0",
     "turbo": "^2.5.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
