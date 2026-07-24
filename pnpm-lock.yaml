@@ -293,8 +293,8 @@ importers:
         specifier: ^7.2.4
         version: 7.2.4
       ulid:
-        specifier: ^2.3.0
-        version: 2.4.0
+        specifier: ^3.0.2
+        version: 3.0.2
       zod:
         specifier: ^3.24.0
         version: 3.25.76
@@ -8054,8 +8054,8 @@ packages:
     resolution: {integrity: sha512-rvKSBiC5zqCCiDZ9kAOszZcDvdAHwwIKJG33Ykj43OKcWsnmcBRL09YTU4nOeHZ8Y2a7l1MgTd08SBe9A8Qj6A==}
     engines: {node: '>=18'}
 
-  ulid@2.4.0:
-    resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
+  ulid@3.0.2:
+    resolution: {integrity: sha512-yu26mwteFYzBAot7KVMqFGCVpsF6g8wXfJzQUHvu1no3+rRRSFcSV2nKeYvNPLD2J4b08jYBDhHUjeH0ygIl9w==}
     hasBin: true
 
   underscore@1.13.8:
@@ -17144,7 +17144,7 @@ snapshots:
   uint8array-extras@1.5.0:
     optional: true
 
-  ulid@2.4.0: {}
+  ulid@3.0.2: {}
 
   underscore@1.13.8:
     optional: true
